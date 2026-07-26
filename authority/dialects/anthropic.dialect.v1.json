@@ -1,0 +1,92 @@
+{
+  "$schema": "../provider-dialect.schema.v1.json",
+  "dialectId": "anthropic-messages",
+  "providerId": "anthropic",
+  "adapterId": "anthropic-messages-adapter",
+  "adapterVersion": "0.1.0",
+  "description": "Anthropic messages dialect. The response is a single message rather than a candidate list, content is always an array of typed blocks, and tool arguments arrive already structured.",
+
+  "recognition": {
+    "detail": "An Anthropic message requires type 'message' and a 'content' array.",
+    "requires": [
+      { "path": "type", "test": "equals", "value": "message" },
+      { "path": "content", "test": "is-array" }
+    ]
+  },
+
+  "identity": {
+    "providerResponseId": "id",
+    "providerRequestId": null,
+    "providerReportedModel": "model"
+  },
+
+  "candidates": {
+    "path": "$self"
+  },
+
+  "content": {
+    "partsPath": "content",
+    "segmentRules": [
+      {
+        "ruleId": "text-block",
+        "when": [
+          { "path": "type", "test": "equals", "value": "text" },
+          { "path": "text", "test": "is-string" }
+        ],
+        "kind": "text",
+        "textPath": "text",
+        "contributesToText": true
+      },
+      {
+        "ruleId": "thinking-block",
+        "when": [{ "path": "type", "test": "equals", "value": "thinking" }],
+        "kind": "reasoning-summary",
+        "textPath": "thinking",
+        "contributesToText": false,
+        "includeWhenPolicy": "content.includeReasoningSummary"
+      },
+      {
+        "ruleId": "tool-use-block",
+        "when": [{ "path": "type", "test": "equals", "value": "tool_use" }],
+        "kind": "tool-call",
+        "toolCall": {
+          "callIdPath": "id",
+          "toolNamePath": "name",
+          "parsedArgumentsPath": "input"
+        }
+      }
+    ],
+    "unmatchedPart": "preserve-as-unsupported"
+  },
+
+  "outcome": {
+    "finishReasonSources": ["stop_reason"],
+    "absentDiagnostic": {
+      "code": "PROVIDER_FINISH_REASON_ABSENT",
+      "severity": "warning",
+      "path": "$.stop_reason",
+      "message": "The provider did not report a stop reason. The canonical disposition was resolved from the remaining testimony."
+    },
+    "emptyCandidateDiagnostic": {
+      "code": "PROVIDER_RETURNED_NO_CANDIDATE_CONTENT",
+      "severity": "warning",
+      "path": "$.content",
+      "message": "The provider returned no content blocks. The response is not represented as completed."
+    }
+  },
+
+  "refusal": {
+    "supported": false
+  },
+
+  "safety": {
+    "supported": false
+  },
+
+  "usage": {
+    "path": "usage",
+    "inputTokens": "input_tokens",
+    "outputTokens": "output_tokens",
+    "cachedInputTokens": "cache_read_input_tokens"
+  }
+}

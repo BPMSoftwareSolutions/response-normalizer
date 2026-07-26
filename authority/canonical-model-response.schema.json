@@ -1,0 +1,352 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capability.local/response-normalizer/canonical-model-response.schema.json",
+  "title": "Canonical Model Response",
+  "description": "One provider-neutral representation of provider response testimony. Shape is normalized; meaning is never repaired.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "responseId",
+    "correlationId",
+    "provider",
+    "model",
+    "outcome",
+    "content",
+    "refusal",
+    "safety",
+    "usage",
+    "diagnostics",
+    "provenance"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+
+    "contractVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+
+    "responseId": { "type": "string", "minLength": 1 },
+    "correlationId": { "type": "string", "minLength": 1 },
+
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "adapterId",
+        "providerResponseId",
+        "providerRequestId"
+      ],
+      "properties": {
+        "providerId": { "type": "string", "minLength": 1 },
+        "adapterId": { "type": "string", "minLength": 1 },
+        "providerResponseId": { "type": ["string", "null"] },
+        "providerRequestId": { "type": ["string", "null"] }
+      }
+    },
+
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestedModel", "resolvedModel", "providerReportedModel"],
+      "properties": {
+        "requestedModel": { "type": ["string", "null"] },
+        "resolvedModel": { "type": ["string", "null"] },
+        "providerReportedModel": { "type": ["string", "null"] }
+      }
+    },
+
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "providerFinishReason", "retryability"],
+      "properties": {
+        "disposition": {
+          "description": "The controlled outcome vocabulary. Provider strings never leak downstream.",
+          "enum": [
+            "completed",
+            "length-limited",
+            "tool-calls-requested",
+            "refused",
+            "safety-blocked",
+            "content-filtered",
+            "cancelled",
+            "provider-failed",
+            "malformed-provider-response",
+            "unsupported-provider-response",
+            "unknown"
+          ]
+        },
+        "providerFinishReason": {
+          "description": "The provider's original finish value, preserved as evidence.",
+          "type": ["string", "null"]
+        },
+        "retryability": {
+          "description": "The normalizer does not decide retryability. The Retry Policy Executor owns that judgement.",
+          "const": "not-classified"
+        }
+      }
+    },
+
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["segments", "combinedText", "structuredOutput", "toolCalls"],
+      "properties": {
+        "segments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contentSegment" }
+        },
+        "combinedText": {
+          "description": "Textual segments only. A tool call is never flattened into prose.",
+          "type": "string"
+        },
+        "structuredOutput": {
+          "oneOf": [{ "$ref": "#/$defs/structuredOutput" }, { "type": "null" }]
+        },
+        "toolCalls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/toolCall" }
+        }
+      }
+    },
+
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "reason", "providerCategory"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "reason": { "type": ["string", "null"] },
+        "providerCategory": { "type": ["string", "null"] }
+      }
+    },
+
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signalsPresent", "signals"],
+      "properties": {
+        "signalsPresent": { "type": "boolean" },
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["category", "severity", "blocked"],
+            "properties": {
+              "category": { "type": "string", "minLength": 1 },
+              "severity": { "type": ["string", "null"] },
+              "blocked": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Only what the provider testified. A null means the provider did not say, which is materially different from zero.",
+      "required": [
+        "disposition",
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "cachedInputTokens",
+        "reasoningTokens",
+        "providerUsage"
+      ],
+      "properties": {
+        "disposition": {
+          "enum": [
+            "observed",
+            "partially-observed",
+            "unavailable",
+            "not-applicable"
+          ]
+        },
+        "inputTokens": { "$ref": "#/$defs/tokenCount" },
+        "outputTokens": { "$ref": "#/$defs/tokenCount" },
+        "totalTokens": { "$ref": "#/$defs/tokenCount" },
+        "cachedInputTokens": { "$ref": "#/$defs/tokenCount" },
+        "reasoningTokens": { "$ref": "#/$defs/tokenCount" },
+        "providerUsage": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "description": "An unavailable usage disposition may not carry token counts.",
+          "if": {
+            "properties": { "disposition": { "const": "unavailable" } },
+            "required": ["disposition"]
+          },
+          "then": {
+            "properties": {
+              "inputTokens": { "type": "null" },
+              "outputTokens": { "type": "null" },
+              "totalTokens": { "type": "null" },
+              "cachedInputTokens": { "type": "null" },
+              "reasoningTokens": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normalizedAt",
+        "normalizerVersion",
+        "adapterVersion",
+        "rawResponseHash",
+        "rawResponseReference"
+      ],
+      "properties": {
+        "normalizedAt": { "type": "string", "format": "date-time" },
+        "normalizerVersion": { "type": "string", "minLength": 1 },
+        "adapterVersion": { "type": "string", "minLength": 1 },
+        "rawResponseHash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "rawResponseReference": { "type": ["string", "null"] }
+      }
+    }
+  },
+
+  "$defs": {
+    "tokenCount": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+
+    "contentSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "kind"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "kind": {
+          "enum": [
+            "text",
+            "tool-call",
+            "refusal",
+            "reasoning-summary",
+            "image",
+            "audio",
+            "unsupported"
+          ]
+        },
+        "text": { "type": "string" },
+        "toolCall": { "$ref": "#/$defs/toolCall" },
+        "raw": {
+          "description": "Verbatim provider material for segment kinds this version does not model."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "text" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["text"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "tool-call" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["toolCall"] }
+        }
+      ]
+    },
+
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "toolName",
+        "argumentsText",
+        "arguments",
+        "argumentsDisposition"
+      ],
+      "properties": {
+        "callId": { "type": "string", "minLength": 1 },
+        "toolName": { "type": "string", "minLength": 1 },
+        "argumentsText": {
+          "description": "The provider's original argument text, retained verbatim.",
+          "type": ["string", "null"]
+        },
+        "arguments": {
+          "description": "Present only when parsing actually succeeded. Never manufactured."
+        },
+        "argumentsDisposition": {
+          "enum": ["parsed", "invalid-json", "absent"]
+        }
+      },
+      "allOf": [
+        {
+          "description": "Arguments that failed to parse may not carry a parsed value.",
+          "if": {
+            "properties": { "argumentsDisposition": { "const": "invalid-json" } },
+            "required": ["argumentsDisposition"]
+          },
+          "then": { "properties": { "arguments": { "type": "null" } } }
+        }
+      ]
+    },
+
+    "structuredOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "value", "source"],
+      "properties": {
+        "disposition": {
+          "enum": [
+            "not-requested",
+            "not-present",
+            "parsed",
+            "invalid-json",
+            "provider-native"
+          ]
+        },
+        "value": {},
+        "source": {
+          "enum": ["provider-structured-output", "text-content", null]
+        }
+      },
+      "allOf": [
+        {
+          "description": "Structured output that failed to parse may not carry a value.",
+          "if": {
+            "properties": { "disposition": { "const": "invalid-json" } },
+            "required": ["disposition"]
+          },
+          "then": { "properties": { "value": { "type": "null" } } }
+        }
+      ]
+    },
+
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "path", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "path": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

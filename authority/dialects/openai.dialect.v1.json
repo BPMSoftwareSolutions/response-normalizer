@@ -1,0 +1,116 @@
+{
+  "$schema": "../provider-dialect.schema.v1.json",
+  "dialectId": "openai-chat-completions",
+  "providerId": "openai",
+  "adapterId": "openai-chat-completions-adapter",
+  "adapterVersion": "0.1.0",
+  "description": "OpenAI chat-completions dialect. Message content may be a bare string or an array of typed parts; refusal is a first-class field.",
+
+  "recognition": {
+    "detail": "An OpenAI chat completion requires a 'choices' array.",
+    "requires": [{ "path": "choices", "test": "is-array" }]
+  },
+
+  "identity": {
+    "providerResponseId": "id",
+    "providerRequestId": null,
+    "providerReportedModel": "model"
+  },
+
+  "candidates": {
+    "path": "choices",
+    "overflowDiagnostic": {
+      "code": "ADDITIONAL_CANDIDATES_NOT_PROJECTED",
+      "severity": "warning",
+      "path": "$.choices",
+      "message": "The provider returned more candidates than policy authorizes. Only the authorized candidates were projected."
+    }
+  },
+
+  "content": {
+    "singlePartPath": "message.content",
+    "partsPath": "message.content",
+    "candidateRules": [
+      {
+        "ruleId": "message-refusal",
+        "when": [{ "path": "message.refusal", "test": "is-string" }],
+        "kind": "refusal",
+        "textPath": "message.refusal",
+        "contributesToText": false
+      }
+    ],
+    "segmentRules": [
+      {
+        "ruleId": "text-part",
+        "when": [
+          { "path": "type", "test": "equals", "value": "text" },
+          { "path": "text", "test": "is-string" }
+        ],
+        "kind": "text",
+        "textPath": "text",
+        "contributesToText": true
+      },
+      {
+        "ruleId": "refusal-part",
+        "when": [{ "path": "type", "test": "equals", "value": "refusal" }],
+        "kind": "refusal",
+        "textPath": "refusal",
+        "contributesToText": false
+      }
+    ],
+    "toolCallSources": [
+      {
+        "path": "message.tool_calls",
+        "diagnosticPath": "$.choices[0].message.tool_calls",
+        "toolCall": {
+          "callIdPath": "id",
+          "toolNamePath": "function.name",
+          "argumentsTextPath": "function.arguments"
+        }
+      }
+    ],
+    "unmatchedPart": "preserve-as-unsupported"
+  },
+
+  "outcome": {
+    "finishReasonSources": ["finish_reason"],
+    "absentDiagnostic": {
+      "code": "PROVIDER_FINISH_REASON_ABSENT",
+      "severity": "warning",
+      "path": "$.choices[0].finish_reason",
+      "message": "The provider did not report a finish reason. The canonical disposition was resolved from the remaining testimony."
+    },
+    "emptyCandidateDiagnostic": {
+      "code": "PROVIDER_RETURNED_NO_CANDIDATE_CONTENT",
+      "severity": "warning",
+      "path": "$.choices",
+      "message": "The provider returned no candidate content. The response is not represented as completed."
+    }
+  },
+
+  "refusal": {
+    "supported": true,
+    "reasonPath": "message.refusal",
+    "providerCategory": "refusal"
+  },
+
+  "safety": {
+    "supported": true,
+    "filterMapSources": [
+      {
+        "path": "content_filter_results",
+        "severityKey": "severity",
+        "blockedKey": "filtered"
+      }
+    ]
+  },
+
+  "usage": {
+    "path": "usage",
+    "inputTokens": "prompt_tokens",
+    "outputTokens": "completion_tokens",
+    "totalTokens": "total_tokens",
+    "cachedInputTokens": "prompt_tokens_details.cached_tokens",
+    "reasoningTokens": "completion_tokens_details.reasoning_tokens"
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "$schema": "./finish-disposition.decision.schema.v1.json",
+  "decisionId": "resolve-finish-disposition",
+  "description": "Maps provider finish testimony into the controlled canonical disposition vocabulary. The provider's original value is always preserved alongside the result; this table decides the canonical label only.",
+
+  "inputs": [
+    "providerId",
+    "providerFinishReason",
+    "refusalPresent",
+    "safetyBlocked",
+    "toolCallsPresent"
+  ],
+
+  "matching": {
+    "providerFinishReason": "case-insensitive",
+    "order": "first-matching-rule-wins"
+  },
+
+  "rules": [
+    {
+      "ruleId": "explicit-refusal-outranks-finish-reason",
+      "when": { "refusalPresent": true },
+      "then": "refused"
+    },
+    {
+      "ruleId": "safety-block-outranks-finish-reason",
+      "when": { "safetyBlocked": true },
+      "then": "safety-blocked"
+    },
+    {
+      "ruleId": "openai-tool-calls",
+      "when": { "providerFinishReason": ["tool_calls", "function_call"] },
+      "then": "tool-calls-requested"
+    },
+    {
+      "ruleId": "anthropic-tool-use",
+      "when": { "providerFinishReason": ["tool_use"] },
+      "then": "tool-calls-requested"
+    },
+    {
+      "ruleId": "gemini-tool-calls",
+      "when": {
+        "providerFinishReason": ["STOP"],
+        "toolCallsPresent": true
+      },
+      "then": "tool-calls-requested"
+    },
+    {
+      "ruleId": "completed",
+      "when": { "providerFinishReason": ["stop", "end_turn", "COMPLETE"] },
+      "then": "completed"
+    },
+    {
+      "ruleId": "length-limited",
+      "when": {
+        "providerFinishReason": [
+          "length",
+          "max_tokens",
+          "MAX_TOKENS",
+          "model_length"
+        ]
+      },
+      "then": "length-limited"
+    },
+    {
+      "ruleId": "content-filtered",
+      "when": {
+        "providerFinishReason": ["content_filter", "PROHIBITED_CONTENT", "SPII"]
+      },
+      "then": "content-filtered"
+    },
+    {
+      "ruleId": "safety-blocked",
+      "when": { "providerFinishReason": ["SAFETY", "BLOCKLIST"] },
+      "then": "safety-blocked"
+    },
+    {
+      "ruleId": "refused",
+      "when": { "providerFinishReason": ["refusal"] },
+      "then": "refused"
+    },
+    {
+      "ruleId": "cancelled",
+      "when": { "providerFinishReason": ["cancelled", "CANCELLED", "abort"] },
+      "then": "cancelled"
+    },
+    {
+      "ruleId": "provider-failed",
+      "when": {
+        "providerFinishReason": ["error", "ERROR", "OTHER", "MALFORMED_FUNCTION_CALL"]
+      },
+      "then": "provider-failed"
+    },
+    {
+      "ruleId": "tool-calls-without-declared-finish-reason",
+      "when": { "providerFinishReason": null, "toolCallsPresent": true },
+      "then": "tool-calls-requested"
+    },
+    {
+      "ruleId": "unclassified-finish-testimony",
+      "when": { "providerFinishReason": "*" },
+      "then": "unknown",
+      "diagnostic": {
+        "code": "FINISH_REASON_NOT_CLASSIFIED",
+        "severity": "warning",
+        "path": "$.outcome.providerFinishReason",
+        "message": "The provider finish reason is not present in the canonical disposition mapping. The original value is preserved and the disposition is reported as unknown."
+      }
+    }
+  ]
+}

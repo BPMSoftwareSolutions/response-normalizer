@@ -1,0 +1,175 @@
+{
+  "semanticExecutionJournalVersion": "1.0",
+  "capabilityId": "normalize-provider-response",
+  "capabilityName": "Response Normalizer",
+  "version": "0.1.0",
+  "canonicalIntent": "Accept raw provider testimony and project it into one canonical response without inventing, repairing, or discarding material facts.",
+  "canonicalOperation": "normalizesProviderResponse(context, dependencies)",
+
+  "owns": [
+    "provider-response shape recognition",
+    "canonical content projection",
+    "finish-disposition mapping",
+    "tool-call projection",
+    "structured-output extraction",
+    "usage projection",
+    "refusal and safety-signal preservation",
+    "provider metadata preservation",
+    "normalization diagnostics",
+    "unsupported-shape rejection"
+  ],
+
+  "doesNotOwn": [
+    "calling the provider",
+    "selecting a provider or model",
+    "parsing arbitrary malformed JSON into valid business output",
+    "validating output against a JSON Schema",
+    "deciding whether to retry",
+    "calculating cost",
+    "generating the final execution receipt",
+    "hiding provider errors",
+    "guessing missing usage values"
+  ],
+
+  "components": [
+    {
+      "componentId": "validates-normalization-request",
+      "responsibility": "rejects a request or policy that cannot be honoured",
+      "implementation": "src/normalize-provider-response/validates-normalization-request.ts"
+    },
+    {
+      "componentId": "resolves-provider-response-adapter",
+      "responsibility": "chooses the one adapter authorized to project this response",
+      "implementation": "src/normalize-provider-response/resolves-provider-response-adapter.ts"
+    },
+    {
+      "componentId": "projects-declared-dialect",
+      "responsibility": "executes a declared provider dialect against provider testimony",
+      "implementation": "src/project-provider-response/projects-declared-dialect.ts"
+    },
+    {
+      "componentId": "resolves-finish-disposition",
+      "responsibility": "executes the declared finish-disposition decision table",
+      "implementation": "src/canonical-model-response/resolves-finish-disposition.ts"
+    },
+    {
+      "componentId": "projects-canonical-content",
+      "responsibility": "assembles ordered segments and the convenience projections",
+      "implementation": "src/canonical-model-response/projects-canonical-content.ts"
+    },
+    {
+      "componentId": "projects-canonical-usage",
+      "responsibility": "projects only the token counts the provider testified to",
+      "implementation": "src/canonical-model-response/projects-canonical-usage.ts"
+    },
+    {
+      "componentId": "validates-canonical-response-projection",
+      "responsibility": "enforces the canonical contract on adapter output",
+      "implementation": "src/normalize-provider-response/validates-canonical-response-projection.ts"
+    },
+    {
+      "componentId": "normalizes-provider-response",
+      "responsibility": "orchestrates the execution slice and attaches provenance",
+      "implementation": "src/normalize-provider-response/normalizes-provider-response.ts"
+    }
+  ],
+
+  "contracts": {
+    "canonicalResponse": "./canonical-model-response.schema.json",
+    "normalizationPolicy": "./normalization-policy.schema.json",
+    "providerDialect": "./provider-dialect.schema.v1.json",
+    "finishDispositionDecision": "./finish-disposition.decision.schema.v1.json"
+  },
+
+  "decisions": [
+    {
+      "decisionId": "resolve-finish-disposition",
+      "declaration": "./finish-disposition.decision.v1.json",
+      "executedBy": "src/canonical-model-response/resolves-finish-disposition.ts"
+    }
+  ],
+
+  "projections": [
+    {
+      "projectionId": "project-openai-chat-completions",
+      "declaration": "./dialects/openai.dialect.v1.json"
+    },
+    {
+      "projectionId": "project-gemini-generate-content",
+      "declaration": "./dialects/gemini.dialect.v1.json"
+    },
+    {
+      "projectionId": "project-anthropic-messages",
+      "declaration": "./dialects/anthropic.dialect.v1.json"
+    }
+  ],
+
+  "ports": [
+    {
+      "portId": "reads-clock",
+      "responsibility": "supplies the normalization instant",
+      "effect": "read-clock"
+    },
+    {
+      "portId": "hashes-value",
+      "responsibility": "produces the deterministic raw-response hash",
+      "effect": "compute"
+    },
+    {
+      "portId": "issues-response-identity",
+      "responsibility": "supplies the canonical response identifier",
+      "effect": "generate-identity"
+    }
+  ],
+
+  "acceptanceAuthority": "../acceptance/normalizes-provider-response.feature",
+
+  "dispositions": [
+    { "code": "NORMALIZED", "exitCode": 0 },
+    { "code": "NORMALIZATION_REQUEST_INVALID", "exitCode": 10 },
+    { "code": "PROVIDER_ADAPTER_NOT_FOUND", "exitCode": 11 },
+    { "code": "PROVIDER_ADAPTER_AMBIGUOUS", "exitCode": 12 },
+    { "code": "PROVIDER_RESPONSE_NOT_RECOGNIZED", "exitCode": 13 },
+    { "code": "PROVIDER_RESPONSE_MALFORMED", "exitCode": 20 },
+    { "code": "CANONICAL_PROJECTION_INVALID", "exitCode": 21 },
+    { "code": "RAW_RESPONSE_HASH_MISMATCH", "exitCode": 22 },
+    { "code": "NORMALIZATION_POLICY_UNSUPPORTED", "exitCode": 30 },
+    { "code": "NORMALIZATION_FAILED", "exitCode": 50 }
+  ],
+
+  "providerDialects": [
+    {
+      "dialectId": "openai-chat-completions",
+      "providerId": "openai",
+      "status": "declared",
+      "declaration": "./dialects/openai.dialect.v1.json"
+    },
+    {
+      "dialectId": "gemini-generate-content",
+      "providerId": "gemini",
+      "status": "declared",
+      "declaration": "./dialects/gemini.dialect.v1.json"
+    },
+    {
+      "dialectId": "anthropic-messages",
+      "providerId": "anthropic",
+      "status": "declared",
+      "declaration": "./dialects/anthropic.dialect.v1.json"
+    },
+    { "dialectId": "litellm", "providerId": "litellm", "status": "deferred" },
+    { "dialectId": "llamacpp", "providerId": "llamacpp", "status": "deferred" }
+  ],
+
+  "proof": {
+    "proofContractId": "response-normalization-proof.v1",
+    "requiredAssertions": [
+      "raw-response-hash-recorded",
+      "raw-response-hash-verified-against-supplied-testimony",
+      "provider-finish-reason-preserved",
+      "canonical-response-validated-against-declared-schema",
+      "usage-projected-only-from-observed-testimony",
+      "diagnostics-recorded-for-preserved-anomalies",
+      "deterministic-output-byte-stable-under-fixed-clock-and-identity"
+    ]
+  }
+}

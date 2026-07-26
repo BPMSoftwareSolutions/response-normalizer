@@ -1,0 +1,24 @@
+{
+  "name": "response-normalizer",
+  "version": "0.1.0",
+  "description": "Accept raw provider testimony and project it into one canonical response without inventing, repairing, or discarding material facts.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test --test-reporter spec tests/acceptance/normalizes-provider-response.steps.test.ts tests/conformance/enforces-normalizer-conformance.test.ts tests/mutation/resists-adversarial-testimony.test.ts",
+    "test:acceptance": "node --import tsx --test --test-reporter spec tests/acceptance/normalizes-provider-response.steps.test.ts",
+    "test:conformance": "node --import tsx --test --test-reporter spec tests/conformance/enforces-normalizer-conformance.test.ts",
+    "test:mutation": "node --import tsx --test --test-reporter spec tests/mutation/resists-adversarial-testimony.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}

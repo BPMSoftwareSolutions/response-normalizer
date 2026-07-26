@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capability.local/response-normalizer/normalization-policy.schema.json",
+  "title": "Normalization Policy",
+  "description": "Declared cross-provider normalization behaviour. This policy may never authorize semantic rewriting: there is deliberately no repairMalformedJson setting, and no property outside this closed schema is accepted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policyVersion",
+    "content",
+    "structuredOutput",
+    "toolCalls",
+    "usage",
+    "rawResponse",
+    "unsupportedContent"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+
+    "policyVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preserveSegmentOrder",
+        "combineTextSegments",
+        "includeReasoningSummary",
+        "maximumCandidates"
+      ],
+      "properties": {
+        "preserveSegmentOrder": {
+          "description": "Provider segment order is evidence. Only true is supported.",
+          "const": true
+        },
+        "combineTextSegments": { "type": "boolean" },
+        "includeReasoningSummary": { "type": "boolean" },
+        "maximumCandidates": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "structuredOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parseTextAsJson", "preserveOriginalText"],
+      "properties": {
+        "parseTextAsJson": {
+          "enum": ["never", "only-when-declared", "always"]
+        },
+        "preserveOriginalText": { "type": "boolean" }
+      }
+    },
+
+    "toolCalls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parseArguments", "retainArgumentsText"],
+      "properties": {
+        "parseArguments": { "type": "boolean" },
+        "retainArgumentsText": { "type": "boolean" }
+      }
+    },
+
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowDerivedTotal", "allowEstimatedUsage"],
+      "properties": {
+        "allowDerivedTotal": {
+          "description": "Permits totalTokens to be summed from observed input and output counts.",
+          "type": "boolean"
+        },
+        "allowEstimatedUsage": {
+          "description": "Estimation belongs to the Token Usage Reporter. Only false is supported here.",
+          "const": false
+        }
+      }
+    },
+
+    "rawResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retention"],
+      "properties": {
+        "retention": { "enum": ["none", "hash-only", "hash-and-reference"] }
+      }
+    },
+
+    "unsupportedContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition"],
+      "properties": {
+        "disposition": { "enum": ["preserve-with-diagnostic", "reject"] }
+      }
+    }
+  }
+}

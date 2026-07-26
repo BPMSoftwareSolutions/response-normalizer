@@ -1,0 +1,117 @@
+{
+  "$schema": "../provider-dialect.schema.v1.json",
+  "dialectId": "gemini-generate-content",
+  "providerId": "gemini",
+  "adapterId": "gemini-generate-content-adapter",
+  "adapterVersion": "0.1.0",
+  "description": "Gemini generateContent dialect. Blocks occur at prompt level as well as candidate level, safety is reported as graded ratings, and a blocked response may carry no candidate at all.",
+
+  "recognition": {
+    "detail": "A Gemini response requires a 'candidates' array or 'promptFeedback'.",
+    "anyOf": [
+      { "path": "candidates", "test": "is-array" },
+      { "path": "promptFeedback", "test": "is-object" }
+    ]
+  },
+
+  "identity": {
+    "providerResponseId": "responseId",
+    "providerRequestId": null,
+    "providerReportedModel": "modelVersion"
+  },
+
+  "candidates": {
+    "path": "candidates",
+    "overflowDiagnostic": {
+      "code": "ADDITIONAL_CANDIDATES_NOT_PROJECTED",
+      "severity": "warning",
+      "path": "$.candidates",
+      "message": "The provider returned more candidates than policy authorizes. Only the authorized candidates were projected."
+    }
+  },
+
+  "content": {
+    "partsPath": "content.parts",
+    "segmentRules": [
+      {
+        "ruleId": "reasoning-part",
+        "when": [
+          { "path": "thought", "test": "is-true" },
+          { "path": "text", "test": "is-string" }
+        ],
+        "kind": "reasoning-summary",
+        "textPath": "text",
+        "contributesToText": false,
+        "includeWhenPolicy": "content.includeReasoningSummary"
+      },
+      {
+        "ruleId": "text-part",
+        "when": [{ "path": "text", "test": "is-string" }],
+        "kind": "text",
+        "textPath": "text",
+        "contributesToText": true
+      },
+      {
+        "ruleId": "function-call-part",
+        "when": [{ "path": "functionCall", "test": "is-object" }],
+        "kind": "tool-call",
+        "toolCall": {
+          "callIdPath": "functionCall.id",
+          "toolNamePath": "functionCall.name",
+          "parsedArgumentsPath": "functionCall.args"
+        }
+      }
+    ],
+    "unmatchedPart": "preserve-as-unsupported"
+  },
+
+  "outcome": {
+    "finishReasonSources": ["finishReason", "$root.promptFeedback.blockReason"],
+    "absentDiagnostic": {
+      "code": "PROVIDER_FINISH_REASON_ABSENT",
+      "severity": "warning",
+      "path": "$.candidates[0].finishReason",
+      "message": "The provider did not report a finish reason. The canonical disposition was resolved from the remaining testimony."
+    },
+    "emptyCandidateDiagnostic": {
+      "code": "PROVIDER_RETURNED_NO_CANDIDATE_CONTENT",
+      "severity": "warning",
+      "path": "$.candidates",
+      "message": "The provider returned no candidate content. The response is not represented as completed."
+    }
+  },
+
+  "refusal": {
+    "supported": false
+  },
+
+  "safety": {
+    "supported": true,
+    "ratingSources": [
+      {
+        "path": "safetyRatings",
+        "categoryPath": "category",
+        "severityPaths": ["probability", "severity"],
+        "blockedWhen": { "path": "blocked", "test": "is-true" }
+      },
+      {
+        "path": "$root.promptFeedback.safetyRatings",
+        "categoryPath": "category",
+        "severityPaths": ["probability", "severity"],
+        "blockedWhen": { "path": "blocked", "test": "is-true" }
+      }
+    ],
+    "blockSignal": {
+      "categoryPath": "$root.promptFeedback.blockReason"
+    }
+  },
+
+  "usage": {
+    "path": "usageMetadata",
+    "inputTokens": "promptTokenCount",
+    "outputTokens": "candidatesTokenCount",
+    "totalTokens": "totalTokenCount",
+    "cachedInputTokens": "cachedContentTokenCount",
+    "reasoningTokens": "thoughtsTokenCount"
+  }
+}

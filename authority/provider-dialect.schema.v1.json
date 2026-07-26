@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capability.local/response-normalizer/provider-dialect.schema.v1.json",
+  "title": "Provider Response Dialect",
+  "description": "Declares how one provider's response shape maps into the canonical model response. Field paths, recognition predicates, and segment rules are authored here rather than stitched inside a code body, so the same authority can project to any language.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dialectId",
+    "providerId",
+    "adapterId",
+    "adapterVersion",
+    "recognition",
+    "identity",
+    "candidates",
+    "content",
+    "outcome",
+    "refusal",
+    "safety",
+    "usage"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "dialectId": { "type": "string", "minLength": 1 },
+    "providerId": { "type": "string", "minLength": 1 },
+    "adapterId": { "type": "string", "minLength": 1 },
+    "adapterVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "description": { "type": "string" },
+
+    "recognition": {
+      "description": "Predicates proving the response belongs to this dialect. All 'requires' entries must hold unless anyOf is satisfied.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detail"],
+      "properties": {
+        "detail": {
+          "description": "Reported when recognition fails.",
+          "type": "string",
+          "minLength": 1
+        },
+        "requires": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/predicate" }
+        },
+        "anyOf": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/predicate" }
+        }
+      }
+    },
+
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerResponseId", "providerRequestId", "providerReportedModel"],
+      "properties": {
+        "providerResponseId": { "$ref": "#/$defs/stringSource" },
+        "providerRequestId": { "$ref": "#/$defs/stringSource" },
+        "providerReportedModel": { "$ref": "#/$defs/stringSource" }
+      }
+    },
+
+    "candidates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "overflowDiagnostic": { "$ref": "#/$defs/diagnosticTemplate" }
+      }
+    },
+
+    "content": {
+      "description": "How one candidate becomes ordered canonical segments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["segmentRules"],
+      "properties": {
+        "partsPath": {
+          "description": "Path, relative to a candidate, to the array of content parts. Absent means the candidate itself is the single part.",
+          "$ref": "#/$defs/path"
+        },
+        "singlePartPath": {
+          "description": "Path to content that may be a bare string instead of an array of parts.",
+          "$ref": "#/$defs/path"
+        },
+        "segmentRules": {
+          "description": "Evaluated in order against each part; the first matching rule wins.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/segmentRule" }
+        },
+        "candidateRules": {
+          "description": "Evaluated against the candidate itself rather than a content part, for dialects carrying a message-level field such as a refusal.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/segmentRule" }
+        },
+        "toolCallSources": {
+          "description": "Arrays of tool calls carried beside the content parts rather than within them.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "toolCall"],
+            "properties": {
+              "path": { "$ref": "#/$defs/path" },
+              "diagnosticPath": { "type": "string", "minLength": 1 },
+              "toolCall": { "$ref": "#/$defs/toolCallBinding" }
+            }
+          }
+        },
+        "unmatchedPart": {
+          "enum": ["preserve-as-unsupported", "ignore"]
+        }
+      }
+    },
+
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finishReasonSources"],
+      "properties": {
+        "finishReasonSources": {
+          "description": "Consulted in order; the first present value is the provider finish reason.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/path" }
+        },
+        "absentDiagnostic": { "$ref": "#/$defs/diagnosticTemplate" },
+        "emptyCandidateDiagnostic": { "$ref": "#/$defs/diagnosticTemplate" }
+      }
+    },
+
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "reasonPath": { "$ref": "#/$defs/path" },
+        "providerCategory": { "type": ["string", "null"] }
+      }
+    },
+
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "ratingSources": {
+          "description": "Arrays of graded safety ratings.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "categoryPath"],
+            "properties": {
+              "path": { "$ref": "#/$defs/path" },
+              "categoryPath": { "$ref": "#/$defs/path" },
+              "severityPaths": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/path" }
+              },
+              "blockedWhen": { "$ref": "#/$defs/predicate" }
+            }
+          }
+        },
+        "filterMapSources": {
+          "description": "Objects keyed by category, as OpenAI content filter results are shaped.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": {
+              "path": { "$ref": "#/$defs/path" },
+              "severityKey": { "type": "string" },
+              "blockedKey": { "type": "string" }
+            }
+          }
+        },
+        "blockSignal": {
+          "description": "A single provider-level block, such as Gemini promptFeedback.blockReason.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["categoryPath"],
+          "properties": {
+            "categoryPath": { "$ref": "#/$defs/path" }
+          }
+        }
+      }
+    },
+
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "inputTokens": { "$ref": "#/$defs/path" },
+        "outputTokens": { "$ref": "#/$defs/path" },
+        "totalTokens": { "$ref": "#/$defs/path" },
+        "cachedInputTokens": { "$ref": "#/$defs/path" },
+        "reasoningTokens": { "$ref": "#/$defs/path" }
+      }
+    }
+  },
+
+  "$defs": {
+    "path": {
+      "description": "A dotted path relative to its declared root. Numeric segments index arrays.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "stringSource": {
+      "oneOf": [{ "$ref": "#/$defs/path" }, { "type": "null" }]
+    },
+
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "test"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "test": {
+          "enum": [
+            "is-array",
+            "is-object",
+            "is-string",
+            "is-present",
+            "is-true",
+            "equals"
+          ]
+        },
+        "value": {}
+      }
+    },
+
+    "segmentRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "when", "kind"],
+      "properties": {
+        "ruleId": { "type": "string", "minLength": 1 },
+        "when": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/predicate" }
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "tool-call",
+            "refusal",
+            "reasoning-summary",
+            "image",
+            "audio",
+            "unsupported"
+          ]
+        },
+        "textPath": { "$ref": "#/$defs/path" },
+        "contributesToText": {
+          "description": "Whether this segment's text feeds combinedText and structured-output parsing.",
+          "type": "boolean"
+        },
+        "includeWhenPolicy": {
+          "description": "Projected only when this normalization policy flag is enabled.",
+          "enum": ["content.includeReasoningSummary"]
+        },
+        "toolCall": { "$ref": "#/$defs/toolCallBinding" }
+      }
+    },
+
+    "toolCallBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolNamePath"],
+      "properties": {
+        "callIdPath": { "$ref": "#/$defs/path" },
+        "toolNamePath": { "$ref": "#/$defs/path" },
+        "argumentsTextPath": { "$ref": "#/$defs/path" },
+        "parsedArgumentsPath": {
+          "description": "Used when the provider already supplies arguments as a structured value.",
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+
+    "diagnosticTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "path", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "path": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

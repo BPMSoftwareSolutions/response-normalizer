@@ -1,0 +1,21 @@
+{
+  "capabilityId": "normalize-provider-response",
+  "title": "Normalize a provider response",
+  "purpose": "Accept raw provider testimony and project it into one canonical response without inventing, repairing, or discarding material facts.",
+  "actor": "authorized-caller",
+  "trigger": "a provider response and its normalization authority are submitted",
+  "desiredOutcome": "one canonical model response that downstream capabilities can consume without knowing which provider produced it",
+
+  "constraints": [
+    "provider testimony is preserved alongside every canonical projection of it",
+    "a value the provider did not supply is reported as absent rather than defaulted",
+    "content segments retain the order the provider produced them in",
+    "malformed provider content is preserved and reported, never repaired",
+    "an unrecognized response is rejected rather than partially projected",
+    "no policy may authorize semantic rewriting of provider testimony",
+    "retryability, schema validity, and cost are decided by other capabilities",
+    "identical testimony under identical authority yields byte-identical output"
+  ],
+
+  "featureIds": ["normalizes-provider-response"]
+}
