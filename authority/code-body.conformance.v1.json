@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "ruleSetId": "four-layer-code-body-conformance",
+  "description": "Declares which syntax each code category may contain. Enforcement is automated so the four-layer discipline is a build gate rather than a style preference.",
+
+  "categories": [
+    {
+      "categoryId": "kernel",
+      "directory": "src/kernel/",
+      "allowedContent": "generic resolver, projector, iterator, predicate dispatch, schema evaluation",
+      "domainDecisionality": "none",
+      "mayContainControlFlow": true,
+      "forbiddenTokens": [
+        "openai",
+        "gemini",
+        "anthropic",
+        "claude",
+        "prompt_tokens",
+        "completion_tokens",
+        "finish_reason",
+        "finishReason",
+        "stop_reason",
+        "candidates",
+        "usageMetadata",
+        "safetyRatings",
+        "promptFeedback",
+        "completed",
+        "length-limited",
+        "safety-blocked",
+        "tool-calls-requested"
+      ]
+    },
+    {
+      "categoryId": "adapter",
+      "directory": "src/adapters/",
+      "allowedContent": "file system, parsing, hashing, clock, identity mechanics",
+      "domainDecisionality": "none",
+      "mayContainControlFlow": true,
+      "forbiddenTokens": [
+        "openai",
+        "gemini",
+        "anthropic",
+        "claude",
+        "prompt_tokens",
+        "completion_tokens",
+        "finish_reason",
+        "stop_reason",
+        "completed",
+        "length-limited",
+        "safety-blocked"
+      ]
+    },
+    {
+      "categoryId": "capability-body",
+      "directories": [
+        "src/normalize-provider-response/",
+        "src/project-provider-response/"
+      ],
+      "allowedContent": "ordered invocations of resolved authority",
+      "domainDecisionality": "none",
+      "mayContainControlFlow": false,
+      "forbiddenSyntax": [
+        "IfStatement",
+        "SwitchStatement",
+        "ForStatement",
+        "ForOfStatement",
+        "ForInStatement",
+        "WhileStatement",
+        "DoWhileStatement"
+      ],
+      "forbiddenTokens": [
+        "openai",
+        "gemini",
+        "anthropic",
+        "claude",
+        "prompt_tokens",
+        "completion_tokens",
+        "finish_reason",
+        "finishReason",
+        "stop_reason",
+        "tool_calls",
+        "functionCall",
+        "promptFeedback",
+        "usageMetadata",
+        "safetyRatings",
+        "content_filter_results",
+        "blockReason"
+      ],
+      "forbiddenDomainLiterals": {
+        "description": "A capability body must not name a canonical disposition. Those come from decision tables.",
+        "tokens": [
+          "\"length-limited\"",
+          "\"safety-blocked\"",
+          "\"content-filtered\"",
+          "\"tool-calls-requested\"",
+          "\"provider-failed\"",
+          "\"malformed-provider-response\""
+        ]
+      }
+    }
+  ]
+}

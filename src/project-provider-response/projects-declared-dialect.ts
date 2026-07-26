@@ -1,113 +1,61 @@
-import {
-  projectsCanonicalContent,
-  projectsStructuredOutput,
-  projectsToolCall,
-  type SegmentDraft,
-} from "../canonical-model-response/projects-canonical-content.js";
-import { projectsCanonicalUsage } from "../canonical-model-response/projects-canonical-usage.js";
-import { resolvesFinishDisposition } from "../canonical-model-response/resolves-finish-disposition.js";
+import { parsesJsonText, serializesJsonValue } from "../adapters/parses-json-text.js";
+import { readsDeclaredDecision } from "../adapters/reads-authority-documents.js";
+import { executesDeclaredProjection } from "../kernel/executes-declared-projection.js";
+import { readsDeclaredPath } from "../kernel/reads-declared-path.js";
+import { readsArray, readsObject, readsString } from "../kernel/reads-provider-values.js";
+import { resolvesDeclaredDecision } from "../kernel/resolves-declared-decision.js";
+import { selectsFirstMatchingRule } from "../kernel/selects-matching-rule.js";
 import type {
   CanonicalModelResponseProjection,
-  CanonicalRefusal,
-  CanonicalSafety,
-  CanonicalSafetySignal,
-  CanonicalToolCall,
   NormalizationDiagnostic,
   NormalizeProviderResponseContext,
 } from "../shared/response-normalizer-contract.js";
-import {
-  readsArray,
-  readsObject,
-  readsString,
-} from "../shared/reads-provider-values.js";
 import type {
   ProviderDialect,
   SegmentRule,
   ToolCallBinding,
 } from "./provider-dialect.type.js";
-import {
-  readsDeclaredPath,
-  satisfiesDeclaredPredicate,
-} from "./reads-declared-path.js";
 
 /**
- * The single provider-neutral projector.
+ * Executes a declared provider dialect.
  *
- * All provider shape knowledge lives in the dialect document under
- * authority/dialects/. This body executes that resolved authority: it locates
- * declared paths, applies declared segment rules, and assembles the canonical
- * regions. It contains no provider names and no provider field names.
+ * Every branch below selects declared authority rather than authoring meaning:
+ * which segment rule applies comes from the dialect, what a finish reason means
+ * comes from a decision table, and what a usage or arguments disposition is
+ * comes from its own decision table. This body wires those together and
+ * performs no domain judgement of its own.
  */
 export function projectsDeclaredDialect(
   dialect: ProviderDialect,
   context: NormalizeProviderResponseContext
 ): CanonicalModelResponseProjection {
-  const diagnostics: NormalizationDiagnostic[] = [];
-  const policy = context.normalizationPolicy;
   const root = context.rawResponse;
+  const diagnostics: NormalizationDiagnostic[] = [];
 
-  const candidate = readsAuthorizedCandidate(dialect, root, policy.content.maximumCandidates, diagnostics);
-
+  const candidate = selectsAuthorizedCandidate(dialect, root, context, diagnostics);
   const segments = projectsSegments(dialect, candidate, root, context, diagnostics);
-
-  const structured = projectsStructuredOutput({
-    textContent: segments.textContent,
-    structuredOutputRequested: context.structuredOutputRequested === true,
-    policy,
-  });
-
-  diagnostics.push(...structured.diagnostics);
-
-  const content = projectsCanonicalContent(
-    segments.drafts,
-    structured.structuredOutput,
-    policy
-  );
-
-  diagnostics.push(...content.diagnostics);
-
-  const refusal = projectsDeclaredRefusal(dialect, candidate, root);
-  const safety = projectsDeclaredSafety(dialect, candidate, root);
-
-  const providerFinishReason = readsDeclaredFinishReason(dialect, candidate, root);
-
-  if (providerFinishReason === null && candidate !== undefined) {
-    pushesTemplate(diagnostics, dialect.outcome.absentDiagnostic);
-  }
-
-  const finish = resolvesFinishDisposition({
-    providerId: dialect.providerId,
-    providerFinishReason,
-    refusalPresent: refusal.present,
-    safetyBlocked: safety.signals.some((signal) => signal.blocked),
-    toolCallsPresent: segments.toolCalls.length > 0,
-  });
-
-  diagnostics.push(...finish.diagnostics);
-
-  if (finish.disposition !== "completed" && segments.drafts.length === 0) {
-    pushesTemplate(diagnostics, dialect.outcome.emptyCandidateDiagnostic);
-  }
-
-  const usage = projectsDeclaredUsage(dialect, root, context, diagnostics);
+  const structuredOutput = projectsStructuredOutput(segments.textContent, context, diagnostics);
+  const refusal = projectsRefusal(dialect, candidate, root);
+  const safety = projectsSafety(dialect, candidate, root);
+  const outcome = projectsOutcome(dialect, candidate, root, segments, refusal, safety, diagnostics);
+  const usage = projectsUsage(dialect, root, context, diagnostics);
+  const identity = projectsIdentity(dialect, root);
 
   return Object.freeze({
     provider: Object.freeze({
-      providerResponseId: readsDeclaredString(dialect.identity.providerResponseId, root, root),
-      providerRequestId: readsDeclaredString(dialect.identity.providerRequestId, root, root),
+      providerResponseId: readsString(identity.providerResponseId),
+      providerRequestId: readsString(identity.providerRequestId),
     }),
     model: Object.freeze({
-      providerReportedModel: readsDeclaredString(
-        dialect.identity.providerReportedModel,
-        root,
-        root
-      ),
+      providerReportedModel: readsString(identity.providerReportedModel),
     }),
-    outcome: Object.freeze({
-      disposition: finish.disposition,
-      providerFinishReason,
+    outcome,
+    content: Object.freeze({
+      segments: segments.segments,
+      combinedText: segments.textContent,
+      structuredOutput,
+      toolCalls: segments.toolCalls,
     }),
-    content: content.content,
     refusal,
     safety,
     usage,
@@ -115,35 +63,69 @@ export function projectsDeclaredDialect(
   });
 }
 
-/**
- * Selects the candidate this projection is authorized to read. A dialect whose
- * candidate path is "$self" carries its result on the response root.
- */
-function readsAuthorizedCandidate(
+/** Reads the identity region through the dialect's declared field bindings. */
+function projectsIdentity(
   dialect: ProviderDialect,
-  root: unknown,
-  maximumCandidates: number,
-  diagnostics: NormalizationDiagnostic[]
-): unknown {
-  if (dialect.candidates.path === "$self") {
-    return root;
-  }
-
-  const candidates = readsArray(readsDeclaredPath(dialect.candidates.path, root, root));
-
-  if (candidates.length > maximumCandidates) {
-    pushesTemplate(diagnostics, dialect.candidates.overflowDiagnostic);
-  }
-
-  return candidates[0];
+  root: unknown
+): Record<string, unknown> {
+  return executesDeclaredProjection(
+    {
+      projectionId: `${dialect.dialectId}-identity`,
+      fields: {
+        providerResponseId: sourceOrNull(dialect.identity.providerResponseId),
+        providerRequestId: sourceOrNull(dialect.identity.providerRequestId),
+        providerReportedModel: sourceOrNull(dialect.identity.providerReportedModel),
+      },
+    },
+    root
+  );
 }
 
+function sourceOrNull(path: string | null): { path: string } | { value: null } {
+  return path === null ? { value: null } : { path };
+}
+
+/**
+ * Selects the candidate this projection is authorized to read, recording the
+ * dialect's declared diagnostic when the provider returned more than policy
+ * authorizes.
+ */
+function selectsAuthorizedCandidate(
+  dialect: ProviderDialect,
+  root: unknown,
+  context: NormalizeProviderResponseContext,
+  diagnostics: NormalizationDiagnostic[]
+): unknown {
+  const carriesResultOnRoot = dialect.candidates.path === SELF_PATH;
+
+  const candidates = readsArray(
+    readsDeclaredPath(dialect.candidates.path, root, root)
+  );
+
+  const overflowed =
+    !carriesResultOnRoot &&
+    candidates.length > context.normalizationPolicy.content.maximumCandidates;
+
+  recordsWhen(overflowed, diagnostics, dialect.candidates.overflowDiagnostic);
+
+  return carriesResultOnRoot ? root : candidates[0];
+}
+
+const SELF_PATH = "$self";
+
 type SegmentProjection = Readonly<{
-  drafts: readonly SegmentDraft[];
-  toolCalls: readonly CanonicalToolCall[];
+  segments: readonly CanonicalModelResponseProjection["content"]["segments"][number][];
+  toolCalls: readonly CanonicalModelResponseProjection["content"]["toolCalls"][number][];
   textContent: string;
 }>;
 
+/**
+ * Projects content parts into ordered canonical segments.
+ *
+ * Iteration order is the provider's. Which rule applies to a part is selected
+ * by the kernel from the dialect's declared rules; this body only assembles
+ * what those rules produced.
+ */
 function projectsSegments(
   dialect: ProviderDialect,
   candidate: unknown,
@@ -151,344 +133,417 @@ function projectsSegments(
   context: NormalizeProviderResponseContext,
   diagnostics: NormalizationDiagnostic[]
 ): SegmentProjection {
-  const drafts: SegmentDraft[] = [];
-  const toolCalls: CanonicalToolCall[] = [];
-  const collectedText: string[] = [];
+  const candidateDrafts = (dialect.content.candidateRules ?? []).flatMap((rule) =>
+    projectsRuleAgainst(rule, candidate, root, context, diagnostics, CANDIDATE_PATH)
+  );
 
-  if (candidate === undefined || candidate === null) {
-    return Object.freeze({ drafts, toolCalls, textContent: "" });
-  }
+  const singleText = readsString(
+    readsDeclaredPath(dialect.content.singlePartPath ?? SELF_PATH, candidate, root)
+  );
 
-  const collector: SegmentCollector = {
-    drafts,
-    toolCalls,
-    collectedText,
-    diagnostics,
-  };
+  const parts = readsArray(
+    readsDeclaredPath(dialect.content.partsPath ?? SELF_PATH, candidate, root)
+  );
 
-  // Candidate-level rules read fields carried on the message itself, such as a
-  // refusal, rather than on a content part.
-  for (const rule of dialect.content.candidateRules ?? []) {
-    appliesRuleWhenMatched(rule, candidate, root, context, collector, "$.candidate", 0);
-  }
+  const bareTextDrafts = whenPresent(singleText, (text) => [
+    Object.freeze({ kind: "text" as const, text, contributesToText: true }),
+  ]);
 
-  // A dialect may carry content as a bare string rather than an array of parts.
-  const singleText =
-    dialect.content.singlePartPath === undefined
-      ? null
-      : readsString(readsDeclaredPath(dialect.content.singlePartPath, candidate, root));
+  const partDrafts = parts.flatMap((part, position) =>
+    projectsPart(dialect, part, root, context, diagnostics, position)
+  );
 
-  if (singleText !== null) {
-    drafts.push({ kind: "text", text: singleText });
-    collectedText.push(singleText);
-  } else {
-    const parts =
-      dialect.content.partsPath === undefined
-        ? []
-        : readsArray(readsDeclaredPath(dialect.content.partsPath, candidate, root));
-
-    parts.forEach((part, position) => {
-      appliesPartRules(dialect, part, root, context, collector, position);
-    });
-  }
-
-  for (const source of dialect.content.toolCallSources ?? []) {
-    const entries = readsArray(readsDeclaredPath(source.path, candidate, root));
-
-    entries.forEach((entry, position) => {
-      appliesToolCallBinding(
+  const toolCallDrafts = (dialect.content.toolCallSources ?? []).flatMap((source) =>
+    readsArray(readsDeclaredPath(source.path, candidate, root)).map((entry, position) =>
+      projectsToolCallDraft(
         source.toolCall,
         entry,
         root,
         context,
-        collector,
+        diagnostics,
         `${source.diagnosticPath ?? source.path}[${position}]`,
         position
-      );
-    });
-  }
+      )
+    )
+  );
 
-  return Object.freeze({
-    drafts,
-    toolCalls,
-    textContent: collectedText.join(""),
-  });
+  const drafts = [
+    ...candidateDrafts,
+    ...(singleText === null ? partDrafts : bareTextDrafts),
+    ...toolCallDrafts,
+  ];
+
+  return assemblesSegments(drafts, context, diagnostics);
 }
 
-type SegmentCollector = {
-  drafts: SegmentDraft[];
-  toolCalls: CanonicalToolCall[];
-  collectedText: string[];
-  diagnostics: NormalizationDiagnostic[];
-};
+const CANDIDATE_PATH = "$.candidate";
+
+type SegmentDraft = Readonly<{
+  kind: CanonicalModelResponseProjection["content"]["segments"][number]["kind"];
+  text?: string;
+  toolCall?: CanonicalModelResponseProjection["content"]["toolCalls"][number];
+  raw?: unknown;
+  contributesToText?: boolean;
+}>;
 
 /**
- * Applies the declared part rules to one content part, first matching rule
- * wins. A part matching no rule is preserved verbatim when the dialect says so.
+ * Projects one content part through the first dialect rule that matches it.
+ * A part no rule matches becomes an unsupported segment when the dialect says
+ * to preserve it.
  */
-function appliesPartRules(
+function projectsPart(
   dialect: ProviderDialect,
   part: unknown,
   root: unknown,
   context: NormalizeProviderResponseContext,
-  collector: SegmentCollector,
+  diagnostics: NormalizationDiagnostic[],
   position: number
-): void {
-  const path = `$.content.parts[${position}]`;
+): readonly SegmentDraft[] {
+  const matched = selectsFirstMatchingRule(dialect.content.segmentRules, part, root);
 
-  for (const rule of dialect.content.segmentRules) {
-    if (!matchesRule(rule, part, root)) {
-      continue;
-    }
+  const preservesUnmatched =
+    dialect.content.unmatchedPart === "preserve-as-unsupported";
 
-    // A rule gated on a policy flag that is disabled drops the segment rather
-    // than falling through to a later rule.
-    if (!satisfiesPolicyGate(rule, context)) {
-      return;
-    }
+  const unmatchedDrafts = preservesUnmatched
+    ? [Object.freeze({ kind: "unsupported" as const, raw: part })]
+    : [];
 
-    appliesRule(rule, part, root, context, collector, path, position);
-
-    return;
-  }
-
-  if (dialect.content.unmatchedPart === "preserve-as-unsupported") {
-    collector.drafts.push({ kind: "unsupported", raw: part });
-  }
+  return matched === null
+    ? unmatchedDrafts
+    : projectsRuleAgainst(
+        matched,
+        part,
+        root,
+        context,
+        diagnostics,
+        `$.content.parts[${position}]`,
+        position
+      );
 }
 
-function appliesRuleWhenMatched(
+/**
+ * Applies one matched rule. A rule gated on a policy flag that is disabled
+ * yields no segment at all.
+ */
+function projectsRuleAgainst(
   rule: SegmentRule,
   value: unknown,
   root: unknown,
   context: NormalizeProviderResponseContext,
-  collector: SegmentCollector,
+  diagnostics: NormalizationDiagnostic[],
   path: string,
-  position: number
-): void {
-  if (!matchesRule(rule, value, root) || !satisfiesPolicyGate(rule, context)) {
-    return;
-  }
+  position = 0
+): readonly SegmentDraft[] {
+  const ruleApplies =
+    selectsFirstMatchingRule([rule], value, root) !== null &&
+    satisfiesPolicyGate(rule, context);
 
-  appliesRule(rule, value, root, context, collector, path, position);
-}
-
-function matchesRule(rule: SegmentRule, value: unknown, root: unknown): boolean {
-  return rule.when.every((predicate) =>
-    satisfiesDeclaredPredicate(predicate, value, root)
-  );
-}
-
-function appliesRule(
-  rule: SegmentRule,
-  value: unknown,
-  root: unknown,
-  context: NormalizeProviderResponseContext,
-  collector: SegmentCollector,
-  path: string,
-  position: number
-): void {
-  if (rule.kind === "tool-call" && rule.toolCall) {
-    appliesToolCallBinding(
-      rule.toolCall,
+  const toolCallDrafts = whenTrue(ruleApplies && rule.kind === "tool-call", () => [
+    projectsToolCallDraft(
+      rule.toolCall as ToolCallBinding,
       value,
       root,
       context,
-      collector,
+      diagnostics,
       path,
       position
-    );
+    ),
+  ]);
 
-    return;
-  }
+  const textDrafts = whenTrue(ruleApplies && rule.kind !== "tool-call", () => [
+    Object.freeze({
+      kind: rule.kind,
+      text: readsString(readsDeclaredPath(rule.textPath ?? SELF_PATH, value, root)) ?? "",
+      contributesToText: rule.contributesToText === true,
+    }),
+  ]);
 
-  const text =
-    rule.textPath === undefined
-      ? null
-      : readsString(readsDeclaredPath(rule.textPath, value, root));
-
-  collector.drafts.push({ kind: rule.kind, text: text ?? "" });
-
-  if (rule.contributesToText === true && text !== null) {
-    collector.collectedText.push(text);
-  }
+  return [...toolCallDrafts, ...textDrafts];
 }
 
-/** Projects one tool call from its declared field bindings. */
-function appliesToolCallBinding(
+/**
+ * Projects one tool call. The arguments disposition is decided by its declared
+ * decision table, never by this body.
+ */
+function projectsToolCallDraft(
   binding: ToolCallBinding,
   value: unknown,
   root: unknown,
   context: NormalizeProviderResponseContext,
-  collector: SegmentCollector,
+  diagnostics: NormalizationDiagnostic[],
   path: string,
   position: number
-): void {
-  const parsedArguments =
+): SegmentDraft {
+  const providerParsed =
     binding.parsedArgumentsPath === undefined
       ? undefined
       : readsDeclaredPath(binding.parsedArgumentsPath, value, root);
 
-  // When a provider supplies arguments already structured, the retained text is
-  // a faithful serialization of that same value rather than separate testimony.
-  const argumentsText =
+  const declaredText =
     binding.argumentsTextPath === undefined
-      ? parsedArguments === undefined
-        ? null
-        : JSON.stringify(parsedArguments)
+      ? null
       : readsString(readsDeclaredPath(binding.argumentsTextPath, value, root));
 
-  const draft: {
-    callId: string;
-    toolName: string;
-    argumentsText: string | null;
-    providerParsedArguments?: unknown;
-  } = {
-    callId:
-      (binding.callIdPath === undefined
-        ? null
-        : readsString(readsDeclaredPath(binding.callIdPath, value, root))) ??
-      `tool-call-${position}`,
-    toolName:
-      readsString(readsDeclaredPath(binding.toolNamePath, value, root)) ??
-      "unknown-tool",
-    argumentsText,
-  };
+  // When a provider supplies arguments already structured, the retained text is
+  // a faithful serialization of that same value, not separate testimony.
+  const argumentsText =
+    declaredText ?? whenPresentValue(providerParsed, serializesJsonValue);
 
-  if (parsedArguments !== undefined) {
-    draft.providerParsedArguments = parsedArguments;
-  }
+  const observedParse = whenPresentValue(declaredText, parsesJsonText);
 
-  const projection = projectsToolCall(draft, context.normalizationPolicy, path);
-
-  collector.diagnostics.push(...projection.diagnostics);
-  collector.toolCalls.push(projection.toolCall);
-  collector.drafts.push({ kind: "tool-call", toolCall: projection.toolCall });
-}
-
-function satisfiesPolicyGate(
-  rule: SegmentRule,
-  context: NormalizeProviderResponseContext
-): boolean {
-  if (rule.includeWhenPolicy === "content.includeReasoningSummary") {
-    return context.normalizationPolicy.content.includeReasoningSummary;
-  }
-
-  return true;
-}
-
-function readsDeclaredFinishReason(
-  dialect: ProviderDialect,
-  candidate: unknown,
-  root: unknown
-): string | null {
-  for (const source of dialect.outcome.finishReasonSources) {
-    const observed = readsString(readsDeclaredPath(source, candidate, root));
-
-    if (observed !== null) {
-      return observed;
+  const resolution = resolvesDeclaredDecision(
+    readsDeclaredDecision("resolve-arguments-disposition"),
+    {
+      providerSuppliedParsedArguments: providerParsed !== undefined,
+      argumentsTextPresent: argumentsText !== null,
+      parsingAuthorized: context.normalizationPolicy.toolCalls.parseArguments,
+      parseSucceeded: observedParse?.parsed ?? false,
     }
-  }
+  );
 
-  return null;
+  recordsWhen(true, diagnostics, rebasesDiagnostic(resolution.diagnostic, path));
+
+  const parsedValue =
+    providerParsed !== undefined
+      ? providerParsed
+      : (observedParse?.parsed === true ? observedParse.value : null);
+
+  return Object.freeze({
+    kind: "tool-call" as const,
+    toolCall: Object.freeze({
+      callId:
+        readsString(
+          readsDeclaredPath(binding.callIdPath ?? SELF_PATH, value, root)
+        ) ?? `tool-call-${position}`,
+      toolName:
+        readsString(readsDeclaredPath(binding.toolNamePath, value, root)) ??
+        "unknown-tool",
+      argumentsText: context.normalizationPolicy.toolCalls.retainArgumentsText
+        ? argumentsText
+        : null,
+      arguments: resolution.outcome === "parsed" ? parsedValue : null,
+      argumentsDisposition: resolution.outcome as "parsed" | "invalid-json" | "absent",
+    }),
+  });
 }
 
-function projectsDeclaredRefusal(
+/** Assigns segment indices in provider order and derives the projections. */
+function assemblesSegments(
+  drafts: readonly SegmentDraft[],
+  context: NormalizeProviderResponseContext,
+  diagnostics: NormalizationDiagnostic[]
+): SegmentProjection {
+  const segments = drafts.map((draft, index) =>
+    Object.freeze({
+      index,
+      kind: draft.kind,
+      ...(draft.text !== undefined ? { text: draft.text } : {}),
+      ...(draft.toolCall !== undefined ? { toolCall: draft.toolCall } : {}),
+      ...(draft.raw !== undefined ? { raw: draft.raw } : {}),
+    })
+  );
+
+  drafts.forEach((draft, index) =>
+    recordsWhen(draft.kind === "unsupported", diagnostics, {
+      code: "UNSUPPORTED_CONTENT_SEGMENT_PRESERVED",
+      severity: "warning",
+      path: `$.content.segments[${index}]`,
+      message:
+        "The provider returned a content segment this contract version does not model. It was preserved verbatim.",
+    })
+  );
+
+  const contributing = drafts.filter((draft) => draft.contributesToText === true);
+
+  const textSource = context.normalizationPolicy.content.combineTextSegments
+    ? contributing
+    : contributing.slice(0, 1);
+
+  return Object.freeze({
+    segments: Object.freeze(segments) as SegmentProjection["segments"],
+    toolCalls: Object.freeze(
+      drafts
+        .filter((draft) => draft.toolCall !== undefined)
+        .map((draft) => draft.toolCall)
+    ) as SegmentProjection["toolCalls"],
+    textContent: textSource.map((draft) => draft.text ?? "").join(""),
+  });
+}
+
+/** Resolves the structured-output region through its declared decision. */
+function projectsStructuredOutput(
+  textContent: string,
+  context: NormalizeProviderResponseContext,
+  diagnostics: NormalizationDiagnostic[]
+): CanonicalModelResponseProjection["content"]["structuredOutput"] {
+  const requested = context.structuredOutputRequested === true;
+  const policy = context.normalizationPolicy.structuredOutput.parseTextAsJson;
+
+  const parsingAuthorized =
+    policy === "always" || (policy === "only-when-declared" && requested);
+
+  const textPresent = textContent.trim() !== "";
+
+  const observedParse = whenTrue(parsingAuthorized && textPresent, () => [
+    parsesJsonText(textContent),
+  ])[0];
+
+  const resolution = resolvesDeclaredDecision(
+    readsDeclaredDecision("resolve-structured-output-disposition"),
+    {
+      providerSuppliedNativeValue: false,
+      parsingAuthorized,
+      structuredOutputRequested: requested,
+      textPresent,
+      parseSucceeded: observedParse?.parsed ?? false,
+    }
+  );
+
+  recordsWhen(true, diagnostics, resolution.diagnostic);
+
+  const carriesValue = resolution.outcome === "parsed";
+  const readFromText =
+    resolution.outcome === "parsed" || resolution.outcome === "invalid-json";
+
+  return Object.freeze({
+    disposition: resolution.outcome as
+      | "not-requested"
+      | "not-present"
+      | "parsed"
+      | "invalid-json"
+      | "provider-native",
+    value: carriesValue ? (observedParse?.value ?? null) : null,
+    source: readFromText ? ("text-content" as const) : null,
+  });
+}
+
+/** Resolves the outcome region through the finish-disposition decision. */
+function projectsOutcome(
+  dialect: ProviderDialect,
+  candidate: unknown,
+  root: unknown,
+  segments: SegmentProjection,
+  refusal: CanonicalModelResponseProjection["refusal"],
+  safety: CanonicalModelResponseProjection["safety"],
+  diagnostics: NormalizationDiagnostic[]
+): CanonicalModelResponseProjection["outcome"] {
+  const providerFinishReason =
+    dialect.outcome.finishReasonSources
+      .map((source) => readsString(readsDeclaredPath(source, candidate, root)))
+      .find((value) => value !== null) ?? null;
+
+  recordsWhen(
+    providerFinishReason === null && candidate !== undefined,
+    diagnostics,
+    dialect.outcome.absentDiagnostic
+  );
+
+  const resolution = resolvesDeclaredDecision(
+    readsDeclaredDecision("resolve-finish-disposition"),
+    {
+      providerId: dialect.providerId,
+      providerFinishReason,
+      refusalPresent: refusal.present,
+      safetyBlocked: safety.signals.some((signal) => signal.blocked),
+      toolCallsPresent: segments.toolCalls.length > 0,
+    }
+  );
+
+  recordsWhen(true, diagnostics, resolution.diagnostic);
+
+  recordsWhen(
+    resolution.outcome !== "completed" && segments.segments.length === 0,
+    diagnostics,
+    dialect.outcome.emptyCandidateDiagnostic
+  );
+
+  return Object.freeze({
+    disposition: resolution.outcome as CanonicalModelResponseProjection["outcome"]["disposition"],
+    providerFinishReason,
+  });
+}
+
+function projectsRefusal(
   dialect: ProviderDialect,
   candidate: unknown,
   root: unknown
-): CanonicalRefusal {
-  if (!dialect.refusal.supported || dialect.refusal.reasonPath === undefined) {
-    return Object.freeze({ present: false, reason: null, providerCategory: null });
-  }
-
-  const reason = readsString(
-    readsDeclaredPath(dialect.refusal.reasonPath, candidate, root)
-  );
+): CanonicalModelResponseProjection["refusal"] {
+  const reason = whenTrue(
+    dialect.refusal.supported && dialect.refusal.reasonPath !== undefined,
+    () => [readsString(readsDeclaredPath(dialect.refusal.reasonPath as string, candidate, root))]
+  )[0] ?? null;
 
   return Object.freeze({
     present: reason !== null,
     reason,
-    providerCategory: reason !== null ? (dialect.refusal.providerCategory ?? null) : null,
+    providerCategory: reason === null ? null : (dialect.refusal.providerCategory ?? null),
   });
 }
 
-function projectsDeclaredSafety(
+/**
+ * Projects graded safety ratings, filter maps, and provider-level blocks into
+ * one safety region. A rating is retained whenever the provider graded it,
+ * whether or not it caused a block.
+ */
+function projectsSafety(
   dialect: ProviderDialect,
   candidate: unknown,
   root: unknown
-): CanonicalSafety {
-  if (!dialect.safety.supported) {
-    return Object.freeze({ signalsPresent: false, signals: Object.freeze([]) });
-  }
+): CanonicalModelResponseProjection["safety"] {
+  const ratingSignals = (dialect.safety.ratingSources ?? []).flatMap((source) =>
+    readsArray(readsDeclaredPath(source.path, candidate, root))
+      .map((entry) => ({
+        category: readsString(readsDeclaredPath(source.categoryPath, entry, root)),
+        severity:
+          (source.severityPaths ?? [])
+            .map((severityPath) => readsString(readsDeclaredPath(severityPath, entry, root)))
+            .find((value) => value !== null) ?? null,
+        blocked:
+          source.blockedWhen !== undefined &&
+          selectsFirstMatchingRule(
+            [{ ruleId: source.path, when: [source.blockedWhen], kind: "text" }],
+            entry,
+            root
+          ) !== null,
+      }))
+      .filter((signal) => signal.category !== null)
+  );
 
-  const signals: CanonicalSafetySignal[] = [];
+  const filterSignals = (dialect.safety.filterMapSources ?? []).flatMap((source) =>
+    Object.entries(readsObject(readsDeclaredPath(source.path, candidate, root)) ?? {})
+      .map(([category, value]) => {
+        const detail = readsObject(value) ?? {};
 
-  for (const source of dialect.safety.ratingSources ?? []) {
-    for (const entry of readsArray(readsDeclaredPath(source.path, candidate, root))) {
-      const category = readsString(
-        readsDeclaredPath(source.categoryPath, entry, root)
-      );
-
-      if (category === null) {
-        continue;
-      }
-
-      const severity =
-        (source.severityPaths ?? [])
-          .map((severityPath) => readsString(readsDeclaredPath(severityPath, entry, root)))
-          .find((value) => value !== null) ?? null;
-
-      signals.push(
-        Object.freeze({
+        return {
           category,
-          severity,
+          severity:
+            source.severityKey === undefined
+              ? null
+              : readsString(detail[source.severityKey]),
           blocked:
-            source.blockedWhen === undefined
-              ? false
-              : satisfiesDeclaredPredicate(source.blockedWhen, entry, root),
-        })
-      );
-    }
-  }
+            source.blockedKey !== undefined && detail[source.blockedKey] === true,
+        };
+      })
+      .filter((signal) => signal.blocked || signal.severity !== null)
+  );
 
-  for (const source of dialect.safety.filterMapSources ?? []) {
-    const filterMap = readsObject(readsDeclaredPath(source.path, candidate, root));
+  const blockCategory = whenTrue(dialect.safety.blockSignal !== undefined, () => [
+    readsString(
+      readsDeclaredPath(
+        (dialect.safety.blockSignal as { categoryPath: string }).categoryPath,
+        candidate,
+        root
+      )
+    ),
+  ])[0];
 
-    if (!filterMap) {
-      continue;
-    }
+  const blockSignals = whenPresent(blockCategory ?? null, (category) => [
+    { category, severity: null, blocked: true },
+  ]);
 
-    for (const [category, value] of Object.entries(filterMap)) {
-      const detail = readsObject(value) ?? {};
-
-      const severity =
-        source.severityKey === undefined
-          ? null
-          : readsString(detail[source.severityKey]);
-
-      const blocked =
-        source.blockedKey !== undefined && detail[source.blockedKey] === true;
-
-      if (!blocked && severity === null) {
-        continue;
-      }
-
-      signals.push(Object.freeze({ category, severity, blocked }));
-    }
-  }
-
-  if (dialect.safety.blockSignal !== undefined) {
-    const blockCategory = readsString(
-      readsDeclaredPath(dialect.safety.blockSignal.categoryPath, candidate, root)
-    );
-
-    if (blockCategory !== null) {
-      signals.push(
-        Object.freeze({ category: blockCategory, severity: null, blocked: true })
-      );
-    }
-  }
+  const signals = [...ratingSignals, ...filterSignals, ...blockSignals].map(
+    (signal) => Object.freeze(signal as { category: string; severity: string | null; blocked: boolean })
+  );
 
   return Object.freeze({
     signalsPresent: signals.length > 0,
@@ -496,7 +551,11 @@ function projectsDeclaredSafety(
   });
 }
 
-function projectsDeclaredUsage(
+/**
+ * Projects usage through the dialect's declared field bindings, then resolves
+ * the disposition through its declared decision.
+ */
+function projectsUsage(
   dialect: ProviderDialect,
   root: unknown,
   context: NormalizeProviderResponseContext,
@@ -504,58 +563,138 @@ function projectsDeclaredUsage(
 ): CanonicalModelResponseProjection["usage"] {
   const rawUsage = readsObject(readsDeclaredPath(dialect.usage.path, root, root));
 
-  const projection = projectsCanonicalUsage(
-    rawUsage
-      ? {
-          inputTokens: readsUsageValue(dialect.usage.inputTokens, rawUsage, root),
-          outputTokens: readsUsageValue(dialect.usage.outputTokens, rawUsage, root),
-          totalTokens: readsUsageValue(dialect.usage.totalTokens, rawUsage, root),
-          cachedInputTokens: readsUsageValue(
-            dialect.usage.cachedInputTokens,
-            rawUsage,
-            root
-          ),
-          reasoningTokens: readsUsageValue(
-            dialect.usage.reasoningTokens,
-            rawUsage,
-            root
-          ),
-          providerUsage: rawUsage,
-        }
-      : undefined,
-    context.normalizationPolicy
+  const observed = executesDeclaredProjection(
+    {
+      projectionId: `${dialect.dialectId}-usage`,
+      fields: {
+        inputTokens: sourceOrNull(dialect.usage.inputTokens ?? null),
+        outputTokens: sourceOrNull(dialect.usage.outputTokens ?? null),
+        totalTokens: sourceOrNull(dialect.usage.totalTokens ?? null),
+        cachedInputTokens: sourceOrNull(dialect.usage.cachedInputTokens ?? null),
+        reasoningTokens: sourceOrNull(dialect.usage.reasoningTokens ?? null),
+      },
+    },
+    rawUsage ?? {}
   );
 
-  diagnostics.push(...projection.diagnostics);
+  const counts = readsTokenCounts(observed, diagnostics);
 
-  return projection.usage;
+  const derivedTotal =
+    context.normalizationPolicy.usage.allowDerivedTotal &&
+    counts.totalTokens === null &&
+    counts.inputTokens !== null &&
+    counts.outputTokens !== null
+      ? counts.inputTokens + counts.outputTokens
+      : counts.totalTokens;
+
+  const resolution = resolvesDeclaredDecision(
+    readsDeclaredDecision("resolve-usage-disposition"),
+    {
+      inputObserved: counts.inputTokens !== null,
+      outputObserved: counts.outputTokens !== null,
+      totalObserved: derivedTotal !== null,
+    }
+  );
+
+  const unavailable = resolution.outcome === "unavailable" || rawUsage === null;
+
+  return Object.freeze({
+    disposition: unavailable
+      ? ("unavailable" as const)
+      : (resolution.outcome as "observed" | "partially-observed"),
+    inputTokens: unavailable ? null : counts.inputTokens,
+    outputTokens: unavailable ? null : counts.outputTokens,
+    totalTokens: unavailable ? null : derivedTotal,
+    cachedInputTokens: unavailable ? null : counts.cachedInputTokens,
+    reasoningTokens: unavailable ? null : counts.reasoningTokens,
+    providerUsage: Object.freeze({ ...(rawUsage ?? {}) }),
+  });
 }
 
-function readsUsageValue(
-  path: string | undefined,
-  usage: unknown,
-  root: unknown
-): unknown {
-  return path === undefined ? undefined : readsDeclaredPath(path, usage, root);
+type TokenCounts = Readonly<{
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  cachedInputTokens: number | null;
+  reasoningTokens: number | null;
+}>;
+
+/**
+ * A token count is accepted only as a non-negative integer. A string, a float,
+ * or a negative number is testimony this contract cannot represent, so it is
+ * reported and dropped rather than coerced.
+ */
+function readsTokenCounts(
+  observed: Record<string, unknown>,
+  diagnostics: NormalizationDiagnostic[]
+): TokenCounts {
+  const readsCount = (field: string): number | null => {
+    const value = observed[field];
+    const usable =
+      typeof value === "number" && Number.isInteger(value) && value >= 0;
+
+    recordsWhen(value !== null && value !== undefined && !usable, diagnostics, {
+      code: "USAGE_TOKEN_COUNT_NOT_INTERPRETABLE",
+      severity: "warning",
+      path: `$.usage.${field}`,
+      message: `The provider reported a token count this contract cannot represent (${JSON.stringify(value)}). It was not projected.`,
+    });
+
+    return usable ? (value as number) : null;
+  };
+
+  return Object.freeze({
+    inputTokens: readsCount("inputTokens"),
+    outputTokens: readsCount("outputTokens"),
+    totalTokens: readsCount("totalTokens"),
+    cachedInputTokens: readsCount("cachedInputTokens"),
+    reasoningTokens: readsCount("reasoningTokens"),
+  });
 }
 
-function readsDeclaredString(
-  path: string | null | undefined,
-  local: unknown,
-  root: unknown
-): string | null {
-  if (path === null || path === undefined) {
-    return null;
-  }
-
-  return readsString(readsDeclaredPath(path, local, root));
+function satisfiesPolicyGate(
+  rule: SegmentRule,
+  context: NormalizeProviderResponseContext
+): boolean {
+  return (
+    rule.includeWhenPolicy !== "content.includeReasoningSummary" ||
+    context.normalizationPolicy.content.includeReasoningSummary
+  );
 }
 
-function pushesTemplate(
+function rebasesDiagnostic(
+  diagnostic: NormalizationDiagnostic | undefined,
+  path: string
+): NormalizationDiagnostic | undefined {
+  return diagnostic === undefined
+    ? undefined
+    : Object.freeze({ ...diagnostic, path });
+}
+
+function recordsWhen(
+  condition: boolean,
   diagnostics: NormalizationDiagnostic[],
-  template: NormalizationDiagnostic | undefined
+  diagnostic: NormalizationDiagnostic | undefined
 ): void {
-  if (template !== undefined) {
-    diagnostics.push(template);
-  }
+  const recordable = condition && diagnostic !== undefined;
+
+  diagnostics.push(...(recordable ? [diagnostic as NormalizationDiagnostic] : []));
+}
+
+function whenTrue<T>(condition: boolean, produces: () => readonly T[]): readonly T[] {
+  return condition ? produces() : [];
+}
+
+function whenPresent<T, R>(
+  value: T | null,
+  produces: (present: T) => readonly R[]
+): readonly R[] {
+  return value === null ? [] : produces(value);
+}
+
+function whenPresentValue<T, R>(
+  value: T | null | undefined,
+  produces: (present: T) => R
+): R | null {
+  return value === null || value === undefined ? null : produces(value);
 }

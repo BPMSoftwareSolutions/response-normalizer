@@ -1,0 +1,26 @@
+{
+  "$schema": "../iteration.schema.v1.json",
+  "iterationId": "project-content-segments",
+  "description": "Declares how a provider's content parts become canonical segments. The collection path and the classifier come from the dialect; ordering, aggregation, and the unsupported-item disposition are declared here.",
+
+  "collection": "$dialect.content.partsPath",
+  "order": "provider-declared-order",
+
+  "classifyWith": "$dialect.content.segmentClassifier",
+
+  "handlers": {
+    "text": "project-text-segment",
+    "refusal": "project-refusal-segment",
+    "reasoning-summary": "project-reasoning-segment",
+    "tool-call": "project-tool-call-segment",
+    "unsupported": "preserve-unsupported-segment"
+  },
+
+  "unsupportedItemDisposition": "preserve-with-diagnostic",
+
+  "collect": {
+    "segments": "all-classified-items-in-declared-order",
+    "combinedText": "concatenate-text-contributing-segments",
+    "toolCalls": "collect-tool-call-segments"
+  }
+}

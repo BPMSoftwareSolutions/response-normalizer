@@ -1,0 +1,45 @@
+{
+  "$schema": "../decision.schema.v1.json",
+  "decisionId": "resolve-usage-disposition",
+  "description": "Classifies how completely the provider testified to token usage. Usage must never silently become fiction: a count the provider did not supply is absent, never zero.",
+
+  "inputs": [
+    "inputObserved",
+    "outputObserved",
+    "totalObserved"
+  ],
+
+  "matching": { "order": "first-matching-rule-wins" },
+
+  "rules": [
+    {
+      "ruleId": "fully-observed",
+      "when": { "inputObserved": true, "outputObserved": true },
+      "then": "observed"
+    },
+    {
+      "ruleId": "only-total-observed",
+      "when": {
+        "inputObserved": false,
+        "outputObserved": false,
+        "totalObserved": true
+      },
+      "then": "partially-observed"
+    },
+    {
+      "ruleId": "one-operand-observed",
+      "when": { "inputObserved": true, "outputObserved": false },
+      "then": "partially-observed"
+    },
+    {
+      "ruleId": "other-operand-observed",
+      "when": { "inputObserved": false, "outputObserved": true },
+      "then": "partially-observed"
+    },
+    {
+      "ruleId": "no-usage-testimony",
+      "when": { "*": "*" },
+      "then": "unavailable"
+    }
+  ]
+}

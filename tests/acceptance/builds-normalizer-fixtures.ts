@@ -1,4 +1,4 @@
-import { readsDefaultNormalizationPolicy } from "../../src/canonical-model-response/reads-authority-documents.js";
+import { readsDefaultNormalizationPolicy } from "../../src/adapters/reads-authority-documents.js";
 import { readsDeclaredAdapters } from "../../src/project-provider-response/creates-declared-adapter.js";
 import type {
   NormalizationPolicy,
@@ -10,7 +10,7 @@ import {
   createsFixedClock,
   createsSequentialIdentity,
   sha256Hashes,
-} from "../../src/shared/runtime-ports.js";
+} from "../../src/adapters/runtime-ports.js";
 
 /**
  * Shared fixtures for the acceptance, conformance, and mutation suites.

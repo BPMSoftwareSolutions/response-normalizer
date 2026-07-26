@@ -1,0 +1,48 @@
+{
+  "$schema": "../decision.schema.v1.json",
+  "decisionId": "resolve-arguments-disposition",
+  "description": "Classifies tool-call argument testimony. Argument text that cannot be parsed is preserved and reported, never repaired.",
+
+  "inputs": [
+    "providerSuppliedParsedArguments",
+    "argumentsTextPresent",
+    "parsingAuthorized",
+    "parseSucceeded"
+  ],
+
+  "matching": { "order": "first-matching-rule-wins" },
+
+  "rules": [
+    {
+      "ruleId": "provider-supplied-structured-arguments",
+      "when": { "providerSuppliedParsedArguments": true },
+      "then": "parsed"
+    },
+    {
+      "ruleId": "no-arguments-text",
+      "when": { "argumentsTextPresent": false },
+      "then": "absent"
+    },
+    {
+      "ruleId": "parsing-not-authorized",
+      "when": { "parsingAuthorized": false },
+      "then": "absent"
+    },
+    {
+      "ruleId": "arguments-parsed",
+      "when": { "parseSucceeded": true },
+      "then": "parsed"
+    },
+    {
+      "ruleId": "arguments-not-parseable",
+      "when": { "parseSucceeded": false },
+      "then": "invalid-json",
+      "diagnostic": {
+        "code": "TOOL_CALL_ARGUMENTS_PARSE_FAILED",
+        "severity": "error",
+        "path": "$.content.toolCalls",
+        "message": "The tool call arguments could not be parsed as JSON. The original text was preserved."
+      }
+    }
+  ]
+}

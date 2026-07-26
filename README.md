@@ -49,35 +49,63 @@ Downstream capabilities get portability. Nobody loses evidence.
 
 ---
 
-## Authority is JSON, code is a projection
+## The four-layer discipline
 
-No provider knowledge lives in TypeScript. A provider is described by a
-**dialect document**, and one generic projector executes it:
+Meaning expands in the semantic layer. Execution collapses in the code layer.
+
+```text
+Semantic authority   = what the system means
+Kernel               = how declarations are mechanically interpreted
+Adapter              = how external effects physically occur
+Capability body      = the linear execution witness
+```
+
+None of the three code categories carries domain decisionality:
+
+| Category | Directory | May branch? | Knows a provider? |
+|---|---|---|---|
+| **Kernel** | `src/kernel/` | yes — it is generic machinery | never |
+| **Adapter** | `src/adapters/` | yes — platform mechanics | never |
+| **Capability body** | `src/normalize-provider-response/`, `src/project-provider-response/` | **no** | never |
+
+`npm run test:discipline` enforces this. A capability body containing an `if`,
+`for`, `switch`, or `while` fails the build, as does any layer that names a
+provider or a provider field in a string literal.
+
+## Authority is JSON, code is a projection
 
 ```text
 authority/
-├── response-normalizer.sej.v1.json          capability journal
-├── canonical-model-response.schema.json     the output contract
-├── normalization-policy.schema.json         declared behaviour, closed
-├── default-normalization-policy.json        the default policy instance
-├── provider-dialect.schema.v1.json          how a dialect may be declared
-├── finish-disposition.decision.v1.json      the disposition decision table
-└── dialects/
-    ├── openai.dialect.v1.json
-    ├── gemini.dialect.v1.json
-    └── anthropic.dialect.v1.json
+├── response-normalizer.sej.v1.json       capability journal
+├── canonical-model-response.schema.json  the output contract
+├── normalization-policy.schema.json      declared behaviour, closed
+├── provider-dialect.schema.v1.json       how a dialect may be declared
+├── decision.schema.v1.json               how a decision may be declared
+├── code-body.conformance.v1.json         the four-layer build gate
+├── decisions/                            every branch that carries meaning
+│   ├── resolve-finish-disposition
+│   ├── resolve-usage-disposition
+│   ├── resolve-arguments-disposition
+│   ├── resolve-structured-output-disposition
+│   ├── resolve-adapter-resolution
+│   ├── resolve-normalization-failure
+│   └── classify-content-segment
+├── dialects/                             one per provider
+│   ├── openai.dialect.v1.json
+│   ├── gemini.dialect.v1.json
+│   └── anthropic.dialect.v1.json
+├── iterations/                           declared iteration authority
+├── execution-model/                      the ordered operation plan
+└── projections/
 ```
 
 Adding a provider is an authoring act, not a coding act: drop a dialect
 document into `authority/dialects/` and it becomes an available adapter.
 
-A conformance test asserts this stays true — the shared projector may not
-contain a provider name or a provider field name in any string literal.
+### Decision tables, not `if` chains
 
-### The decision table, not an `if` chain
-
-The finish-reason mapping is declared, so it can be read and audited without
-opening a code file:
+Every branch that carries meaning is declared, so it can be read and audited
+without opening a code file:
 
 ```json
 {
@@ -87,9 +115,13 @@ opening a code file:
 }
 ```
 
-Rules are ordered, first match wins, and the table ends with a catch-all that
-resolves to `unknown` plus a diagnostic — so no testimony is ever silently
-dropped.
+Rules are ordered, first match wins, and tables consulted with open-ended
+testimony end with a catch-all — so nothing is ever silently dropped. A
+conformance test proves each terminal rule exists and that every outcome lands
+in the canonical vocabulary.
+
+The kernel that evaluates these tables knows how to compare a value and
+dispatch a rule. It does not know that `STOP` means completed.
 
 ---
 
@@ -195,15 +227,19 @@ npm run typecheck
 npm test
 ```
 
-Three suites, 55 tests:
+Four suites, 90 tests:
 
 - **`tests/acceptance/`** — one describe block per scenario in
   `acceptance/normalizes-provider-response.feature`, in order. A conformance
   test fails the build if a declared scenario has no implementation.
 - **`tests/conformance/`** — the authority documents validate against their own
-  schemas, every decision outcome is in the canonical vocabulary, the policy
-  schema declares no rewriting setting, and the projector carries no provider
-  knowledge.
+  schemas, every decision outcome is in the canonical vocabulary, every
+  open-ended table declares a terminal rule, the policy schema declares no
+  rewriting setting, and the projector carries no provider knowledge.
+- **`tests/conformance/enforces-four-layer-discipline`** — the build gate. No
+  capability body contains authored control flow, no layer names a provider or
+  provider field, no body names a canonical disposition, and the kernel neither
+  references this capability's vocabulary nor imports from it.
 - **`tests/mutation/`** — the adversarial catalogue. Deleted finish reasons,
   stringified token counts, reordered blocks, ambiguous adapters, empty
   candidates, safety metadata without content, fabricated totals, omitted

@@ -8,7 +8,7 @@ import type {
 } from "../shared/response-normalizer-contract.js";
 import { projectsDeclaredDialect } from "./projects-declared-dialect.js";
 import type { ProviderDialect } from "./provider-dialect.type.js";
-import { satisfiesDeclaredPredicate } from "./reads-declared-path.js";
+import { satisfiesDeclaredPredicate } from "../kernel/reads-declared-path.js";
 
 /**
  * Turns a declared dialect document into a provider response adapter.
@@ -36,40 +36,44 @@ export function createsDeclaredAdapter(
   });
 }
 
-/** Evaluates the dialect's declared recognition predicates. */
+/**
+ * Evaluates the dialect's declared recognition predicates.
+ *
+ * A dialect is recognized when every "requires" predicate holds, at least one
+ * "anyOf" predicate holds when any are declared, and the dialect declared at
+ * least one predicate to begin with.
+ */
 export function recognizesDeclaredDialect(
   dialect: ProviderDialect,
   response: unknown
 ): ProviderResponseRecognition {
-  if (typeof response !== "object" || response === null || Array.isArray(response)) {
-    return { recognized: false, detail: "The response is not a JSON object." };
-  }
-
   const { requires, anyOf, detail } = dialect.recognition;
+
+  const isJsonObject =
+    typeof response === "object" && response !== null && !Array.isArray(response);
 
   const requiredHold = (requires ?? []).every((predicate) =>
     satisfiesDeclaredPredicate(predicate, response, response)
   );
 
-  if (!requiredHold) {
-    return { recognized: false, detail };
-  }
-
-  if (anyOf !== undefined && anyOf.length > 0) {
-    const anyHold = anyOf.some((predicate) =>
+  const alternativesHold =
+    anyOf === undefined ||
+    anyOf.length === 0 ||
+    anyOf.some((predicate) =>
       satisfiesDeclaredPredicate(predicate, response, response)
     );
 
-    if (!anyHold) {
-      return { recognized: false, detail };
-    }
-  }
+  const declaresPredicates = (requires ?? []).length > 0 || anyOf !== undefined;
 
-  if ((requires ?? []).length === 0 && anyOf === undefined) {
-    return { recognized: false, detail };
-  }
+  const recognized =
+    isJsonObject && requiredHold && alternativesHold && declaresPredicates;
 
-  return { recognized: true, confidence: "exact" };
+  return recognized
+    ? { recognized: true, confidence: "exact" }
+    : {
+        recognized: false,
+        detail: isJsonObject ? detail : "The response is not a JSON object.",
+      };
 }
 
 const DIALECT_ROOT = new URL("../../authority/dialects/", import.meta.url);
@@ -78,25 +82,23 @@ let declaredDialects: readonly ProviderDialect[] | null = null;
 
 /** Loads every declared dialect document, in stable filename order. */
 export function readsDeclaredDialects(): readonly ProviderDialect[] {
-  if (declaredDialects !== null) {
-    return declaredDialects;
-  }
-
-  const directory = fileURLToPath(DIALECT_ROOT);
-
-  const dialects = readdirSync(directory)
-    .filter((entry) => entry.endsWith(".json"))
-    .sort()
-    .map(
-      (entry) =>
-        JSON.parse(
-          readFileSync(fileURLToPath(new URL(entry, DIALECT_ROOT)), "utf8")
-        ) as ProviderDialect
-    );
-
-  declaredDialects = Object.freeze(dialects);
+  declaredDialects = declaredDialects ?? loadsDialects();
 
   return declaredDialects;
+}
+
+function loadsDialects(): readonly ProviderDialect[] {
+  return Object.freeze(
+    readdirSync(fileURLToPath(DIALECT_ROOT))
+      .filter((entry) => entry.endsWith(".json"))
+      .sort()
+      .map(
+        (entry) =>
+          JSON.parse(
+            readFileSync(fileURLToPath(new URL(entry, DIALECT_ROOT)), "utf8")
+          ) as ProviderDialect
+      )
+  );
 }
 
 /** The adapter set every declared dialect provides. */

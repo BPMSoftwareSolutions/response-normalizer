@@ -2,7 +2,7 @@ import type {
   NormalizationDiagnostic,
   SegmentKind,
 } from "../shared/response-normalizer-contract.js";
-import type { DeclaredPredicate } from "./reads-declared-path.js";
+import type { DeclaredPredicate } from "../kernel/reads-declared-path.js";
 
 /**
  * The TypeScript view of a provider dialect document.

@@ -3,12 +3,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import {
+  readsAllDeclaredDecisions,
   readsCanonicalResponseSchema,
+  readsDeclaredDecision,
+  readsDecisionSchema,
   readsDefaultNormalizationPolicy,
-  readsFinishDispositionDecision,
   readsNormalizationPolicySchema,
-} from "../../src/canonical-model-response/reads-authority-documents.js";
-import { validatesAgainstSchema } from "../../src/canonical-model-response/validates-against-schema.js";
+} from "../../src/adapters/reads-authority-documents.js";
+import { validatesAgainstSchema } from "../../src/kernel/validates-against-schema.js";
 import { normalizesProviderResponse } from "../../src/normalize-provider-response/normalizes-provider-response.js";
 import {
   readsDeclaredAdapters,
@@ -19,7 +21,7 @@ import {
   FAILURE_EXIT_CODES,
   NORMALIZATION_FAILURE_CODES,
 } from "../../src/shared/response-normalizer-contract.js";
-import { canonicalJson } from "../../src/shared/runtime-ports.js";
+import { canonicalJson } from "../../src/adapters/runtime-ports.js";
 import {
   buildsContext,
   buildsDependencies,
@@ -65,28 +67,54 @@ describe("Conformance: the declared authority is internally valid", () => {
     }
   });
 
-  it("validates the finish-disposition decision against its schema", () => {
-    const violations = validatesAgainstSchema(
-      readsFinishDispositionDecision(),
-      readsAuthorityJson("finish-disposition.decision.schema.v1.json")
-    );
+  it("validates every declared decision against the decision schema", () => {
+    const decisions = readsAllDeclaredDecisions();
 
-    assert.deepEqual(violations, []);
+    assert.ok(decisions.length >= 6);
+
+    for (const decision of decisions) {
+      const violations = validatesAgainstSchema(decision, readsDecisionSchema());
+
+      assert.deepEqual(
+        violations,
+        [],
+        `Decision "${decision.decisionId}" violates the decision contract: ${JSON.stringify(violations)}`
+      );
+    }
   });
 
   it("declares a terminal catch-all rule so no testimony goes unclassified", () => {
-    const { rules } = readsFinishDispositionDecision();
-    const terminal = rules[rules.length - 1];
+    // Every decision consulted with open-ended testimony must resolve to
+    // something rather than falling through unmatched.
+    for (const decisionId of [
+      "resolve-finish-disposition",
+      "resolve-usage-disposition",
+      "resolve-normalization-failure",
+    ]) {
+      const { rules } = readsDeclaredDecision(decisionId);
+      const terminal = rules[rules.length - 1];
 
-    assert.equal(terminal?.when.providerFinishReason, "*");
-    assert.ok(RESPONSE_DISPOSITIONS.includes(terminal?.then as never));
+      assert.ok(
+        Object.values(terminal?.when ?? {}).includes("*"),
+        `Decision "${decisionId}" declares no terminal catch-all rule.`
+      );
+    }
   });
 
-  it("resolves every decision outcome to the canonical vocabulary", () => {
-    for (const rule of readsFinishDispositionDecision().rules) {
+  it("resolves every finish-disposition outcome to the canonical vocabulary", () => {
+    for (const rule of readsDeclaredDecision("resolve-finish-disposition").rules) {
       assert.ok(
-        RESPONSE_DISPOSITIONS.includes(rule.then),
+        RESPONSE_DISPOSITIONS.includes(rule.then as never),
         `Rule "${rule.ruleId}" resolves to a noncanonical disposition.`
+      );
+    }
+  });
+
+  it("resolves every failure outcome to the stable failure vocabulary", () => {
+    for (const rule of readsDeclaredDecision("resolve-normalization-failure").rules) {
+      assert.ok(
+        NORMALIZATION_FAILURE_CODES.includes(rule.then as never),
+        `Rule "${rule.ruleId}" resolves to an unrecognized failure code.`
       );
     }
   });

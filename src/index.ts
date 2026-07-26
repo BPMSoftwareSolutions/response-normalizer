@@ -14,11 +14,20 @@ export {
 } from "./project-provider-response/creates-declared-adapter.js";
 
 export {
-  readsDefaultNormalizationPolicy,
+  readsAllDeclaredDecisions,
   readsCanonicalResponseSchema,
+  readsDeclaredDecision,
+  readsDecisionSchema,
+  readsDefaultNormalizationPolicy,
+  readsExecutionPlan,
   readsNormalizationPolicySchema,
-  readsFinishDispositionDecision,
-} from "./canonical-model-response/reads-authority-documents.js";
+  readsProviderDialectSchema,
+} from "./adapters/reads-authority-documents.js";
+
+export { resolvesDeclaredDecision } from "./kernel/resolves-declared-decision.js";
+export { executesDeclaredProjection } from "./kernel/executes-declared-projection.js";
+export { executesDeclaredIteration } from "./kernel/executes-declared-iteration.js";
+export { selectsFirstMatchingRule } from "./kernel/selects-matching-rule.js";
 
 export {
   canonicalJson,
@@ -27,9 +36,9 @@ export {
   randomIdentity,
   sha256Hashes,
   systemClock,
-} from "./shared/runtime-ports.js";
+} from "./adapters/runtime-ports.js";
 
-export { validatesAgainstSchema } from "./canonical-model-response/validates-against-schema.js";
+export { validatesAgainstSchema } from "./kernel/validates-against-schema.js";
 
 export type {
   CanonicalContent,

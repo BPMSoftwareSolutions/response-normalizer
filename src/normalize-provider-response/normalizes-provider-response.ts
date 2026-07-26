@@ -1,14 +1,15 @@
+import { readsObject } from "../kernel/reads-provider-values.js";
 import {
   CANONICAL_CONTRACT_VERSION,
   NORMALIZER_VERSION,
   type CanonicalModelResponse,
   type NormalizationDiagnostic,
   type NormalizationFailure,
+  type NormalizeProviderResponseContext,
   type NormalizeProviderResponseResult,
   type NormalizerDependencies,
   type ProviderResponseAdapter,
 } from "../shared/response-normalizer-contract.js";
-import { readsObject } from "../shared/reads-provider-values.js";
 import { resolvesProviderResponseAdapter } from "./resolves-provider-response-adapter.js";
 import { validatesCanonicalResponseProjection } from "./validates-canonical-response-projection.js";
 import {
@@ -20,109 +21,166 @@ import {
  * Accept raw provider testimony and project it into one canonical response
  * without inventing, repairing, or discarding material facts.
  *
- * The execution slice is fixed:
- *
- *   validate request
- *        ▼
- *   resolve adapter
- *        ▼
- *   confirm recognition
- *        ▼
- *   project provider testimony
- *        ▼
- *   enforce canonical contract
- *        ▼
- *   attach provenance
- *
- * No step is skipped, and no failure is converted into a partial success.
+ * The body is a linear execution witness. Each stage below either yields a
+ * failure or passes its work forward; the first failure is the result. Nothing
+ * here interprets a provider, a finish reason, or a usage value — those answers
+ * arrive already resolved from the authority documents.
  */
 export function normalizesProviderResponse(
   context: unknown,
   dependencies: NormalizerDependencies
 ): NormalizeProviderResponseResult {
-  const validation = validatesNormalizationRequest(context);
+  const stages: readonly NormalizationStage[] = [
+    validatesRequest,
+    resolvesAdapter,
+    verifiesRawResponseHash,
+    projectsTestimony,
+    buildsAndValidatesResponse,
+  ];
 
-  if (!validation.accepted) {
-    return rejects(validation.failure);
-  }
+  const execution = stages.reduce<StageOutcome>(
+    (carried, stage) => (carried.failure ? carried : stage(carried, dependencies)),
+    Object.freeze({ context })
+  );
 
-  const validContext = asValidatedContext(context);
+  return execution.failure
+    ? rejects(execution.failure, execution.response?.diagnostics)
+    : Object.freeze({
+        disposition: "normalized" as const,
+        response: execution.response as CanonicalModelResponse,
+        diagnostics: (execution.response as CanonicalModelResponse).diagnostics,
+      });
+}
 
+type StageOutcome = Readonly<{
+  context: unknown;
+  adapter?: ProviderResponseAdapter;
+  projection?: ReturnType<ProviderResponseAdapter["projectsCanonicalResponse"]>;
+  response?: CanonicalModelResponse;
+  failure?: NormalizationFailure;
+}>;
+
+type NormalizationStage = (
+  carried: StageOutcome,
+  dependencies: NormalizerDependencies
+) => StageOutcome;
+
+const validatesRequest: NormalizationStage = (carried) => {
+  const validation = validatesNormalizationRequest(carried.context);
+
+  return validation.accepted
+    ? carried
+    : Object.freeze({ ...carried, failure: validation.failure });
+};
+
+const resolvesAdapter: NormalizationStage = (carried, dependencies) => {
   const resolution = resolvesProviderResponseAdapter(
-    validContext,
+    asValidatedContext(carried.context),
     dependencies.adapters
   );
 
-  if (!resolution.resolved) {
-    return rejects(resolution.failure);
-  }
+  return resolution.resolved
+    ? Object.freeze({ ...carried, adapter: resolution.adapter })
+    : Object.freeze({ ...carried, failure: resolution.failure });
+};
 
-  const { adapter } = resolution;
+/**
+ * Verifying the supplied hash proves the testimony being projected is the
+ * testimony that was witnessed. A mismatch means the evidence chain is broken.
+ */
+const verifiesRawResponseHash: NormalizationStage = (carried, dependencies) => {
+  const context = asValidatedContext(carried.context);
+  const observed = dependencies.hashes.hashes(context.rawResponse);
 
-  // Verifying the supplied hash proves the testimony being projected is the
-  // testimony that was witnessed. A mismatch means the evidence chain is broken.
-  const observedHash = dependencies.hashes.hashes(validContext.rawResponse);
+  return observed === context.rawResponseHash
+    ? carried
+    : Object.freeze({
+        ...carried,
+        failure: Object.freeze({
+          code: "RAW_RESPONSE_HASH_MISMATCH" as const,
+          detail: `The supplied rawResponseHash does not match the raw response. Expected ${context.rawResponseHash} but observed ${observed}.`,
+          pointer: "/rawResponseHash",
+        }),
+      });
+};
 
-  if (observedHash !== validContext.rawResponseHash) {
-    return rejects({
-      code: "RAW_RESPONSE_HASH_MISMATCH",
-      detail: `The supplied rawResponseHash does not match the raw response. Expected ${validContext.rawResponseHash} but observed ${observedHash}.`,
-      pointer: "/rawResponseHash",
-    });
-  }
+/**
+ * Runs the adapter behind a mechanical boundary. The catch observes; it does
+ * not classify. An adapter that omitted a canonical region is caught here too,
+ * because the envelope cannot be built from a projection it cannot read.
+ */
+const projectsTestimony: NormalizationStage = (carried) => {
+  const adapter = carried.adapter as ProviderResponseAdapter;
+  const observed = observesProjection(adapter, asValidatedContext(carried.context));
 
-  const projection = projectsUnderAdapter(adapter, validContext);
+  const missingRegion = CANONICAL_REGIONS.find(
+    (region) =>
+      observed.projected &&
+      (readsObject(observed.projection)?.[region] ?? null) === null
+  );
 
-  if (!projection.projected) {
-    return rejects(projection.failure);
-  }
+  const failure =
+    observed.projected === false
+      ? observed.failure
+      : missingRegion !== undefined
+        ? Object.freeze({
+            code: "CANONICAL_PROJECTION_INVALID" as const,
+            detail: `The adapter projection is missing the required "${missingRegion}" region.`,
+            pointer: `$.${missingRegion}`,
+          })
+        : undefined;
 
-  // An adapter that omitted a whole canonical region cannot be read safely, so
-  // its shape is checked before the envelope is built rather than after.
-  const shapeCheck = validatesProjectionShape(projection.projection);
+  return failure
+    ? Object.freeze({ ...carried, failure })
+    : Object.freeze({
+        ...carried,
+        projection: (observed as { projection: StageOutcome["projection"] }).projection,
+      });
+};
 
-  if (!shapeCheck.valid) {
-    return rejects(shapeCheck.failure);
-  }
+const buildsAndValidatesResponse: NormalizationStage = (carried, dependencies) => {
+  const context = asValidatedContext(carried.context);
 
   const response = buildsCanonicalResponse(
-    validContext,
-    adapter,
-    projection.projection,
+    context,
+    carried.adapter as ProviderResponseAdapter,
+    carried.projection as NonNullable<StageOutcome["projection"]>,
     dependencies
   );
 
   const contractCheck = validatesCanonicalResponseProjection(
     response,
-    validContext.normalizationPolicy
+    context.normalizationPolicy
   );
 
-  if (!contractCheck.valid) {
-    return rejects(contractCheck.failure, response.diagnostics);
-  }
+  return contractCheck.valid
+    ? Object.freeze({ ...carried, response })
+    : Object.freeze({ ...carried, response, failure: contractCheck.failure });
+};
 
-  return Object.freeze({
-    disposition: "normalized" as const,
-    response,
-    diagnostics: response.diagnostics,
-  });
-}
+/** The canonical regions an adapter must supply for the envelope to be built. */
+const CANONICAL_REGIONS = Object.freeze([
+  "provider",
+  "model",
+  "outcome",
+  "content",
+  "refusal",
+  "safety",
+  "usage",
+  "diagnostics",
+] as const);
 
-type AdapterProjection =
+type ObservedProjection =
   | Readonly<{
       projected: true;
       projection: ReturnType<ProviderResponseAdapter["projectsCanonicalResponse"]>;
     }>
   | Readonly<{ projected: false; failure: NormalizationFailure }>;
 
-/**
- * Runs the adapter. A throwing adapter is observed and classified here; it does
- * not become an unhandled failure or a fabricated success.
- */
-function projectsUnderAdapter(
+function observesProjection(
   adapter: ProviderResponseAdapter,
-  context: ReturnType<typeof asValidatedContext>
-): AdapterProjection {
+  context: NormalizeProviderResponseContext
+): ObservedProjection {
   try {
     return Object.freeze({
       projected: true as const,
@@ -133,65 +191,13 @@ function projectsUnderAdapter(
       projected: false as const,
       failure: Object.freeze({
         code: "PROVIDER_RESPONSE_MALFORMED" as const,
-        detail:
-          error instanceof Error
-            ? `The adapter "${adapter.adapterId}" could not project the provider response: ${error.message}`
-            : `The adapter "${adapter.adapterId}" could not project the provider response.`,
+        detail: `The adapter "${adapter.adapterId}" could not project the provider response: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
         pointer: "/rawResponse",
       }),
     });
   }
-}
-
-type ShapeCheck =
-  | Readonly<{ valid: true }>
-  | Readonly<{ valid: false; failure: NormalizationFailure }>;
-
-/**
- * Confirms every canonical region the envelope builder must read is present.
- *
- * This is deliberately narrow: it proves the projection can be read, and the
- * full contract validator then proves it is correct.
- */
-function validatesProjectionShape(projection: unknown): ShapeCheck {
-  const regions = [
-    "provider",
-    "model",
-    "outcome",
-    "content",
-    "refusal",
-    "safety",
-    "usage",
-    "diagnostics",
-  ] as const;
-
-  const candidate = readsObject(projection);
-
-  if (!candidate) {
-    return Object.freeze({
-      valid: false as const,
-      failure: Object.freeze({
-        code: "CANONICAL_PROJECTION_INVALID" as const,
-        detail: "The adapter did not return a projection object.",
-        pointer: "$",
-      }),
-    });
-  }
-
-  for (const region of regions) {
-    if (candidate[region] === undefined || candidate[region] === null) {
-      return Object.freeze({
-        valid: false as const,
-        failure: Object.freeze({
-          code: "CANONICAL_PROJECTION_INVALID" as const,
-          detail: `The adapter projection is missing the required "${region}" region.`,
-          pointer: `$.${region}`,
-        }),
-      });
-    }
-  }
-
-  return Object.freeze({ valid: true as const });
 }
 
 /**
@@ -201,15 +207,13 @@ function validatesProjectionShape(projection: unknown): ShapeCheck {
  * canonical response carries the same evidence regardless of provider.
  */
 function buildsCanonicalResponse(
-  context: ReturnType<typeof asValidatedContext>,
+  context: NormalizeProviderResponseContext,
   adapter: ProviderResponseAdapter,
-  projection: ReturnType<ProviderResponseAdapter["projectsCanonicalResponse"]>,
+  projection: NonNullable<StageOutcome["projection"]>,
   dependencies: NormalizerDependencies
 ): CanonicalModelResponse {
-  const retention = context.normalizationPolicy.rawResponse.retention;
-
-  const rawResponseReference =
-    retention === "hash-and-reference" ? (context.rawResponseReference ?? null) : null;
+  const retainsReference =
+    context.normalizationPolicy.rawResponse.retention === "hash-and-reference";
 
   return Object.freeze({
     contractVersion: CANONICAL_CONTRACT_VERSION,
@@ -248,7 +252,9 @@ function buildsCanonicalResponse(
       normalizerVersion: NORMALIZER_VERSION,
       adapterVersion: adapter.adapterVersion,
       rawResponseHash: context.rawResponseHash,
-      rawResponseReference,
+      rawResponseReference: retainsReference
+        ? (context.rawResponseReference ?? null)
+        : null,
     }),
   });
 }

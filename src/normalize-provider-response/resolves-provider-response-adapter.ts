@@ -1,3 +1,5 @@
+import { readsDeclaredDecision } from "../adapters/reads-authority-documents.js";
+import { resolvesDeclaredDecision } from "../kernel/resolves-declared-decision.js";
 import type {
   NormalizationFailure,
   NormalizeProviderResponseContext,
@@ -7,9 +9,9 @@ import type {
 /**
  * Chooses the one adapter authorized to project this response.
  *
- * Ambiguity is a rejection, never a silent pick. If two adapters both claim a
- * response, the capability cannot say whose testimony it is projecting, so it
- * declines rather than guessing.
+ * Whether zero, one, or several declared adapters constitutes an authorization
+ * is decided by resolve-adapter-resolution, not here. This body observes the
+ * facts and reports what that decision returned.
  */
 
 export type AdapterResolution =
@@ -25,50 +27,70 @@ export function resolvesProviderResponseAdapter(
   const declared = adapters.filter(
     (adapter) =>
       adapter.providerId === providerId &&
-      (adapterId === undefined || adapterId === "" || adapter.adapterId === adapterId)
+      [undefined, "", adapter.adapterId].includes(adapterId)
   );
 
-  if (declared.length === 0) {
-    return rejects(
-      "PROVIDER_ADAPTER_NOT_FOUND",
+  const candidate = declared[0];
+  const recognition = candidate?.recognizes(context.rawResponse);
+
+  const outcome = resolvesDeclaredDecision(
+    readsDeclaredDecision("resolve-adapter-resolution"),
+    {
+      declaredAdapterCount: declared.length,
+      multipleAdaptersDeclared: declared.length > 1,
+      responseRecognized: recognition?.recognized === true,
+    }
+  ).outcome;
+
+  const detail = DETAILS[outcome]?.({
+    providerId,
+    adapterId,
+    declared,
+    recognitionDetail:
+      recognition?.recognized === false ? recognition.detail : "",
+  });
+
+  return outcome === ADAPTER_RESOLVED
+    ? Object.freeze({
+        resolved: true as const,
+        adapter: candidate as ProviderResponseAdapter,
+      })
+    : Object.freeze({
+        resolved: false as const,
+        failure: Object.freeze({
+          code: outcome as NormalizationFailure["code"],
+          detail: detail ?? "No authorized adapter could be resolved.",
+          pointer: POINTERS[outcome] ?? "/providerAuthority",
+        }),
+      });
+}
+
+const ADAPTER_RESOLVED = "adapter-resolved";
+
+type DetailFacts = Readonly<{
+  providerId: string;
+  adapterId: string;
+  declared: readonly ProviderResponseAdapter[];
+  recognitionDetail: string;
+}>;
+
+/** Human-readable testimony for each declared outcome. */
+const DETAILS: Readonly<Record<string, (facts: DetailFacts) => string>> =
+  Object.freeze({
+    PROVIDER_ADAPTER_NOT_FOUND: ({ providerId, adapterId }) =>
       `No authorized adapter is declared for provider "${providerId}"${
         adapterId ? ` and adapter "${adapterId}"` : ""
       }.`,
-      "/providerAuthority"
-    );
-  }
-
-  if (declared.length > 1) {
-    return rejects(
-      "PROVIDER_ADAPTER_AMBIGUOUS",
+    PROVIDER_ADAPTER_AMBIGUOUS: ({ providerId, declared }) =>
       `${declared.length} adapters claim provider "${providerId}": ${declared
         .map((adapter) => adapter.adapterId)
         .join(", ")}. Exactly one must be authorized.`,
-      "/providerAuthority"
-    );
-  }
-
-  const adapter = declared[0] as ProviderResponseAdapter;
-  const recognition = adapter.recognizes(context.rawResponse);
-
-  if (!recognition.recognized) {
-    return rejects(
-      "PROVIDER_RESPONSE_NOT_RECOGNIZED",
-      `The adapter "${adapter.adapterId}" does not recognize the provider response: ${recognition.detail}`,
-      "/rawResponse"
-    );
-  }
-
-  return Object.freeze({ resolved: true as const, adapter });
-}
-
-function rejects(
-  code: NormalizationFailure["code"],
-  detail: string,
-  pointer: string
-): AdapterResolution {
-  return Object.freeze({
-    resolved: false as const,
-    failure: Object.freeze({ code, detail, pointer }),
+    PROVIDER_RESPONSE_NOT_RECOGNIZED: ({ declared, recognitionDetail }) =>
+      `The adapter "${declared[0]?.adapterId}" does not recognize the provider response: ${recognitionDetail}`,
   });
-}
+
+const POINTERS: Readonly<Record<string, string>> = Object.freeze({
+  PROVIDER_ADAPTER_NOT_FOUND: "/providerAuthority",
+  PROVIDER_ADAPTER_AMBIGUOUS: "/providerAuthority",
+  PROVIDER_RESPONSE_NOT_RECOGNIZED: "/rawResponse",
+});

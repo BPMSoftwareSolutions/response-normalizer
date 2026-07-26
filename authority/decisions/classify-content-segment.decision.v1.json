@@ -1,0 +1,22 @@
+{
+  "$schema": "../decision.schema.v1.json",
+  "decisionId": "classify-content-segment",
+  "description": "Classifies one provider content part into a canonical segment kind. Dialect documents supply their own classifier; this is the default used when a dialect declares none. A part no rule classifies becomes an unsupported segment preserved verbatim.",
+
+  "inputs": ["type", "text", "thought"],
+
+  "matching": { "caseSensitive": true, "order": "first-matching-rule-wins" },
+
+  "rules": [
+    {
+      "ruleId": "text-part",
+      "when": { "type": "text" },
+      "then": "text"
+    },
+    {
+      "ruleId": "refusal-part",
+      "when": { "type": "refusal" },
+      "then": "refusal"
+    }
+  ]
+}

@@ -8,9 +8,10 @@
   "main": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test --test-reporter spec tests/acceptance/normalizes-provider-response.steps.test.ts tests/conformance/enforces-normalizer-conformance.test.ts tests/mutation/resists-adversarial-testimony.test.ts",
+    "test": "node --import tsx --test --test-reporter spec tests/acceptance/normalizes-provider-response.steps.test.ts tests/conformance/enforces-normalizer-conformance.test.ts tests/conformance/enforces-four-layer-discipline.test.ts tests/mutation/resists-adversarial-testimony.test.ts",
     "test:acceptance": "node --import tsx --test --test-reporter spec tests/acceptance/normalizes-provider-response.steps.test.ts",
     "test:conformance": "node --import tsx --test --test-reporter spec tests/conformance/enforces-normalizer-conformance.test.ts",
+    "test:discipline": "node --import tsx --test --test-reporter spec tests/conformance/enforces-four-layer-discipline.test.ts",
     "test:mutation": "node --import tsx --test --test-reporter spec tests/mutation/resists-adversarial-testimony.test.ts"
   },
   "devDependencies": {

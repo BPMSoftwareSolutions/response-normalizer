@@ -1,5 +1,5 @@
 {
-  "$schema": "./finish-disposition.decision.schema.v1.json",
+  "$schema": "../decision.schema.v1.json",
   "decisionId": "resolve-finish-disposition",
   "description": "Maps provider finish testimony into the controlled canonical disposition vocabulary. The provider's original value is always preserved alongside the result; this table decides the canonical label only.",
 
@@ -11,10 +11,7 @@
     "toolCallsPresent"
   ],
 
-  "matching": {
-    "providerFinishReason": "case-insensitive",
-    "order": "first-matching-rule-wins"
-  },
+  "matching": { "caseSensitive": false, "order": "first-matching-rule-wins" },
 
   "rules": [
     {
@@ -28,21 +25,15 @@
       "then": "safety-blocked"
     },
     {
-      "ruleId": "openai-tool-calls",
-      "when": { "providerFinishReason": ["tool_calls", "function_call"] },
-      "then": "tool-calls-requested"
-    },
-    {
-      "ruleId": "anthropic-tool-use",
-      "when": { "providerFinishReason": ["tool_use"] },
-      "then": "tool-calls-requested"
-    },
-    {
-      "ruleId": "gemini-tool-calls",
+      "ruleId": "tool-calls-requested",
       "when": {
-        "providerFinishReason": ["STOP"],
-        "toolCallsPresent": true
+        "providerFinishReason": ["tool_calls", "function_call", "tool_use"]
       },
+      "then": "tool-calls-requested"
+    },
+    {
+      "ruleId": "completed-finish-reason-accompanied-by-tool-calls",
+      "when": { "providerFinishReason": ["stop"], "toolCallsPresent": true },
       "then": "tool-calls-requested"
     },
     {
@@ -81,13 +72,13 @@
     },
     {
       "ruleId": "cancelled",
-      "when": { "providerFinishReason": ["cancelled", "CANCELLED", "abort"] },
+      "when": { "providerFinishReason": ["cancelled", "abort"] },
       "then": "cancelled"
     },
     {
       "ruleId": "provider-failed",
       "when": {
-        "providerFinishReason": ["error", "ERROR", "OTHER", "MALFORMED_FUNCTION_CALL"]
+        "providerFinishReason": ["error", "OTHER", "MALFORMED_FUNCTION_CALL"]
       },
       "then": "provider-failed"
     },

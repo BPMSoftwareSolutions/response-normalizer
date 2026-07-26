@@ -1,0 +1,54 @@
+{
+  "$schema": "../decision.schema.v1.json",
+  "decisionId": "resolve-structured-output-disposition",
+  "description": "Classifies structured-output testimony. Text is parsed as JSON only when the caller declared structured output and policy authorizes it. A parse failure is reported, never corrected.",
+
+  "inputs": [
+    "providerSuppliedNativeValue",
+    "parsingAuthorized",
+    "structuredOutputRequested",
+    "textPresent",
+    "parseSucceeded"
+  ],
+
+  "matching": { "order": "first-matching-rule-wins" },
+
+  "rules": [
+    {
+      "ruleId": "provider-native-structured-output",
+      "when": { "providerSuppliedNativeValue": true },
+      "then": "provider-native"
+    },
+    {
+      "ruleId": "parsing-not-authorized-and-not-requested",
+      "when": { "parsingAuthorized": false, "structuredOutputRequested": false },
+      "then": "not-requested"
+    },
+    {
+      "ruleId": "requested-but-parsing-not-authorized",
+      "when": { "parsingAuthorized": false, "structuredOutputRequested": true },
+      "then": "not-present"
+    },
+    {
+      "ruleId": "authorized-but-no-text",
+      "when": { "parsingAuthorized": true, "textPresent": false },
+      "then": "not-present"
+    },
+    {
+      "ruleId": "text-parsed",
+      "when": { "parseSucceeded": true },
+      "then": "parsed"
+    },
+    {
+      "ruleId": "text-not-parseable",
+      "when": { "parseSucceeded": false },
+      "then": "invalid-json",
+      "diagnostic": {
+        "code": "STRUCTURED_OUTPUT_PARSE_FAILED",
+        "severity": "error",
+        "path": "$.content",
+        "message": "The declared structured output could not be parsed as JSON."
+      }
+    }
+  ]
+}

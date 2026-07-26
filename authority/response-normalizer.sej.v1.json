@@ -31,16 +31,46 @@
     "guessing missing usage values"
   ],
 
+  "codeCategories": {
+    "description": "Three code categories, none of which may carry domain decisionality. The semantic layer holds the meaning; these execute it.",
+    "conformance": "./code-body.conformance.v1.json",
+    "kernel": {
+      "directory": "src/kernel/",
+      "responsibility": "generic decision resolution, projection, iteration, predicate dispatch, and schema evaluation",
+      "domainDecisionality": "none"
+    },
+    "adapters": {
+      "directory": "src/adapters/",
+      "responsibility": "file system, JSON parsing, hashing, clock, and identity mechanics",
+      "domainDecisionality": "none"
+    },
+    "capabilityBodies": {
+      "directories": [
+        "src/normalize-provider-response/",
+        "src/project-provider-response/"
+      ],
+      "responsibility": "ordered invocation of resolved authority",
+      "domainDecisionality": "none"
+    }
+  },
+
   "components": [
     {
+      "componentId": "normalizes-provider-response",
+      "responsibility": "the collapsed execution witness: validate, resolve, verify, project, seal",
+      "implementation": "src/normalize-provider-response/normalizes-provider-response.ts",
+      "executionPlan": "./execution-model/normalize-provider-response.plan.v1.json"
+    },
+    {
       "componentId": "validates-normalization-request",
-      "responsibility": "rejects a request or policy that cannot be honoured",
+      "responsibility": "evaluates the declared request requirements and the policy contract",
       "implementation": "src/normalize-provider-response/validates-normalization-request.ts"
     },
     {
       "componentId": "resolves-provider-response-adapter",
-      "responsibility": "chooses the one adapter authorized to project this response",
-      "implementation": "src/normalize-provider-response/resolves-provider-response-adapter.ts"
+      "responsibility": "observes adapter facts and reports the declared resolution",
+      "implementation": "src/normalize-provider-response/resolves-provider-response-adapter.ts",
+      "decisionId": "resolve-adapter-resolution"
     },
     {
       "componentId": "projects-declared-dialect",
@@ -48,29 +78,42 @@
       "implementation": "src/project-provider-response/projects-declared-dialect.ts"
     },
     {
-      "componentId": "resolves-finish-disposition",
-      "responsibility": "executes the declared finish-disposition decision table",
-      "implementation": "src/canonical-model-response/resolves-finish-disposition.ts"
-    },
-    {
-      "componentId": "projects-canonical-content",
-      "responsibility": "assembles ordered segments and the convenience projections",
-      "implementation": "src/canonical-model-response/projects-canonical-content.ts"
-    },
-    {
-      "componentId": "projects-canonical-usage",
-      "responsibility": "projects only the token counts the provider testified to",
-      "implementation": "src/canonical-model-response/projects-canonical-usage.ts"
-    },
-    {
       "componentId": "validates-canonical-response-projection",
       "responsibility": "enforces the canonical contract on adapter output",
       "implementation": "src/normalize-provider-response/validates-canonical-response-projection.ts"
+    }
+  ],
+
+  "kernelEngines": [
+    {
+      "engineId": "resolves-declared-decision",
+      "responsibility": "evaluates any declared decision table",
+      "implementation": "src/kernel/resolves-declared-decision.ts"
     },
     {
-      "componentId": "normalizes-provider-response",
-      "responsibility": "orchestrates the execution slice and attaches provenance",
-      "implementation": "src/normalize-provider-response/normalizes-provider-response.ts"
+      "engineId": "executes-declared-projection",
+      "responsibility": "builds a target shape from a declared field map",
+      "implementation": "src/kernel/executes-declared-projection.ts"
+    },
+    {
+      "engineId": "executes-declared-iteration",
+      "responsibility": "classifies a declared collection in declared order",
+      "implementation": "src/kernel/executes-declared-iteration.ts"
+    },
+    {
+      "engineId": "selects-matching-rule",
+      "responsibility": "selects the first rule whose declared predicates hold",
+      "implementation": "src/kernel/selects-matching-rule.ts"
+    },
+    {
+      "engineId": "validates-against-schema",
+      "responsibility": "evaluates a value against a declared JSON Schema",
+      "implementation": "src/kernel/validates-against-schema.ts"
+    },
+    {
+      "engineId": "reads-declared-path",
+      "responsibility": "resolves a declared path and evaluates a declared predicate",
+      "implementation": "src/kernel/reads-declared-path.ts"
     }
   ],
 
@@ -78,16 +121,57 @@
     "canonicalResponse": "./canonical-model-response.schema.json",
     "normalizationPolicy": "./normalization-policy.schema.json",
     "providerDialect": "./provider-dialect.schema.v1.json",
-    "finishDispositionDecision": "./finish-disposition.decision.schema.v1.json"
+    "decision": "./decision.schema.v1.json",
+    "codeBodyConformance": "./code-body.conformance.v1.json"
   },
 
   "decisions": [
     {
       "decisionId": "resolve-finish-disposition",
-      "declaration": "./finish-disposition.decision.v1.json",
-      "executedBy": "src/canonical-model-response/resolves-finish-disposition.ts"
+      "responsibility": "maps provider finish testimony to the canonical disposition",
+      "declaration": "./decisions/resolve-finish-disposition.decision.v1.json"
+    },
+    {
+      "decisionId": "resolve-usage-disposition",
+      "responsibility": "classifies how completely usage was testified to",
+      "declaration": "./decisions/resolve-usage-disposition.decision.v1.json"
+    },
+    {
+      "decisionId": "resolve-arguments-disposition",
+      "responsibility": "classifies tool-call argument testimony",
+      "declaration": "./decisions/resolve-arguments-disposition.decision.v1.json"
+    },
+    {
+      "decisionId": "resolve-structured-output-disposition",
+      "responsibility": "classifies structured-output testimony",
+      "declaration": "./decisions/resolve-structured-output-disposition.decision.v1.json"
+    },
+    {
+      "decisionId": "resolve-adapter-resolution",
+      "responsibility": "decides whether exactly one adapter is authorized",
+      "declaration": "./decisions/resolve-adapter-resolution.decision.v1.json"
+    },
+    {
+      "decisionId": "resolve-normalization-failure",
+      "responsibility": "classifies an observed failure into the stable vocabulary",
+      "declaration": "./decisions/resolve-normalization-failure.decision.v1.json"
+    },
+    {
+      "decisionId": "classify-content-segment",
+      "responsibility": "classifies one provider content part into a segment kind",
+      "declaration": "./decisions/classify-content-segment.decision.v1.json"
     }
   ],
+
+  "iterations": [
+    {
+      "iterationId": "project-content-segments",
+      "responsibility": "declares collection, order, classifier, and aggregation for content parts",
+      "declaration": "./iterations/project-content-segments.iteration.v1.json"
+    }
+  ],
+
+  "executionModel": "./execution-model/normalize-provider-response.plan.v1.json",
 
   "projections": [
     {

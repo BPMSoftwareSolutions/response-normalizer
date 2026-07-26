@@ -1,5 +1,5 @@
-import { readsCanonicalResponseSchema } from "../canonical-model-response/reads-authority-documents.js";
-import { validatesAgainstSchema } from "../canonical-model-response/validates-against-schema.js";
+import { readsCanonicalResponseSchema } from "../adapters/reads-authority-documents.js";
+import { validatesAgainstSchema } from "../kernel/validates-against-schema.js";
 import type {
   CanonicalModelResponse,
   NormalizationFailure,
@@ -9,15 +9,55 @@ import type {
 /**
  * Enforces the canonical contract on an adapter's work.
  *
- * Two classes of defect are caught here. The schema catches structural
- * violations — a noncanonical disposition, a missing provider identity, a
- * parsed value attached to unparseable testimony. The semantic checks catch an
- * adapter fabricating arithmetic the provider never testified to.
+ * The schema catches structural violations — a noncanonical disposition, a
+ * missing provider identity, a parsed value attached to unparseable testimony.
+ * The usage assertions below catch an adapter fabricating arithmetic the
+ * provider never testified to.
  */
 
 export type ProjectionValidation =
   | Readonly<{ valid: true }>
   | Readonly<{ valid: false; failure: NormalizationFailure }>;
+
+type UsageAssertion = Readonly<{
+  pointer: string;
+  detail: (facts: UsageFacts) => string;
+  violated: (facts: UsageFacts) => boolean;
+}>;
+
+type UsageFacts = Readonly<{
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  disposition: CanonicalModelResponse["usage"]["disposition"];
+  allowDerivedTotal: boolean;
+}>;
+
+/**
+ * A provider may legitimately report a total exceeding input + output, since
+ * some bill reasoning separately. A total *below* the sum of its own parts is
+ * arithmetic no provider testimony supports.
+ */
+const USAGE_ASSERTIONS: readonly UsageAssertion[] = Object.freeze([
+  {
+    pointer: "$.usage.totalTokens",
+    detail: ({ totalTokens, inputTokens, outputTokens }) =>
+      `The projected totalTokens (${totalTokens}) is less than the sum of the observed input and output tokens (${(inputTokens ?? 0) + (outputTokens ?? 0)}).`,
+    violated: ({ inputTokens, outputTokens, totalTokens, allowDerivedTotal }) =>
+      inputTokens !== null &&
+      outputTokens !== null &&
+      totalTokens !== null &&
+      totalTokens < inputTokens + outputTokens &&
+      !allowDerivedTotal,
+  },
+  {
+    pointer: "$.usage.disposition",
+    detail: () =>
+      "The usage disposition claims full observation but the projection is missing an observed token count.",
+    violated: ({ inputTokens, outputTokens, disposition }) =>
+      disposition === "observed" && (inputTokens === null || outputTokens === null),
+  },
+]);
 
 export function validatesCanonicalResponseProjection(
   response: CanonicalModelResponse,
@@ -28,73 +68,54 @@ export function validatesCanonicalResponseProjection(
     readsCanonicalResponseSchema()
   );
 
-  if (violations.length > 0) {
-    const first = violations[0];
+  const schemaFailure = whenPresent(violations[0], (violation) =>
+    rejects(
+      `The canonical projection violates the response contract: ${violation.path} ${violation.message}`,
+      violation.path
+    )
+  );
 
-    return rejects(
-      `The canonical projection violates the response contract: ${first?.path} ${first?.message}`,
-      first?.path
-    );
-  }
-
-  return validatesUsageTestimony(response, policy);
-}
-
-/**
- * A total the provider did not report may only appear when policy authorizes a
- * derived total and both operands were observed. Anything else is invention.
- */
-function validatesUsageTestimony(
-  response: CanonicalModelResponse,
-  policy: NormalizationPolicy
-): ProjectionValidation {
-  const { usage } = response;
-
-  if (usage.disposition === "unavailable" || usage.disposition === "not-applicable") {
-    return Object.freeze({ valid: true as const });
-  }
-
-  const { inputTokens, outputTokens, totalTokens } = usage;
-
-  if (totalTokens === null) {
-    return Object.freeze({ valid: true as const });
-  }
-
-  const bothOperandsObserved = inputTokens !== null && outputTokens !== null;
-
-  if (bothOperandsObserved) {
-    const sum = (inputTokens as number) + (outputTokens as number);
-
-    // A provider may legitimately report a total that exceeds input + output,
-    // since some providers bill reasoning tokens separately. A total *below*
-    // the sum of its own parts is arithmetic no provider testimony supports.
-    if (totalTokens < sum && !policy.usage.allowDerivedTotal) {
-      return rejects(
-        `The projected totalTokens (${totalTokens}) is less than the sum of the observed input and output tokens (${sum}).`,
-        "$.usage.totalTokens"
-      );
-    }
-
-    return Object.freeze({ valid: true as const });
-  }
-
-  // Only one operand was observed, so the total must be the provider's own.
-  if (usage.disposition === "observed") {
-    return rejects(
-      "The usage disposition claims full observation but the projection is missing an observed token count.",
-      "$.usage.disposition"
-    );
-  }
-
-  return Object.freeze({ valid: true as const });
-}
-
-function rejects(detail: string, pointer?: string): ProjectionValidation {
-  const failure: NormalizationFailure = Object.freeze({
-    code: "CANONICAL_PROJECTION_INVALID" as const,
-    detail,
-    ...(pointer ? { pointer } : {}),
+  const facts: UsageFacts = Object.freeze({
+    inputTokens: response.usage.inputTokens,
+    outputTokens: response.usage.outputTokens,
+    totalTokens: response.usage.totalTokens,
+    disposition: response.usage.disposition,
+    allowDerivedTotal: policy.usage.allowDerivedTotal,
   });
 
-  return Object.freeze({ valid: false as const, failure });
+  const usageApplies = !UNCOUNTED_DISPOSITIONS.includes(facts.disposition);
+
+  const breached = USAGE_ASSERTIONS.find(
+    (assertion) => usageApplies && assertion.violated(facts)
+  );
+
+  const usageFailure = whenPresent(breached, (assertion) =>
+    rejects(assertion.detail(facts), assertion.pointer)
+  );
+
+  return schemaFailure ?? usageFailure ?? Object.freeze({ valid: true as const });
+}
+
+/** Dispositions that carry no counts, so the arithmetic assertions do not apply. */
+const UNCOUNTED_DISPOSITIONS: readonly string[] = Object.freeze([
+  "unavailable",
+  "not-applicable",
+]);
+
+function rejects(detail: string, pointer?: string): ProjectionValidation {
+  return Object.freeze({
+    valid: false as const,
+    failure: Object.freeze({
+      code: "CANONICAL_PROJECTION_INVALID" as const,
+      detail,
+      ...(pointer ? { pointer } : {}),
+    }),
+  });
+}
+
+function whenPresent<T, R>(
+  value: T | undefined,
+  produces: (present: T) => R
+): R | undefined {
+  return value === undefined ? undefined : produces(value);
 }

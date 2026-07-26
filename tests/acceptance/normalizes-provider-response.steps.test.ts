@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { normalizesProviderResponse } from "../../src/normalize-provider-response/normalizes-provider-response.js";
-import { canonicalJson } from "../../src/shared/runtime-ports.js";
+import { canonicalJson } from "../../src/adapters/runtime-ports.js";
 import {
   buildsAnthropicResponse,
   buildsContext,

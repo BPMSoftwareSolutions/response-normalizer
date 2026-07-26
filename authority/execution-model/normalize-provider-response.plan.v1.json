@@ -1,0 +1,47 @@
+{
+  "$schema": "./execution-plan.schema.v1.json",
+  "planId": "normalize-provider-response",
+  "description": "The ordered operations of one normalization. Execution receives this plan already resolved and asks nothing about what a provider is or what STOP means.",
+
+  "operations": [
+    {
+      "sequence": 1,
+      "operation": "validate-normalization-request",
+      "contractId": "normalization-policy.v1",
+      "onFailure": "reject"
+    },
+    {
+      "sequence": 2,
+      "operation": "resolve-provider-response-adapter",
+      "decisionId": "resolve-adapter-resolution",
+      "onFailure": "reject"
+    },
+    {
+      "sequence": 3,
+      "operation": "verify-raw-response-hash",
+      "portId": "hashes-value",
+      "onFailure": "reject"
+    },
+    {
+      "sequence": 4,
+      "operation": "project-provider-testimony",
+      "projectionId": "project-canonical-regions",
+      "onFailure": "reject"
+    },
+    {
+      "sequence": 5,
+      "operation": "validate-canonical-projection",
+      "contractId": "canonical-model-response.v1",
+      "onFailure": "reject"
+    },
+    {
+      "sequence": 6,
+      "operation": "attach-normalization-provenance",
+      "projectionId": "project-normalization-provenance",
+      "onFailure": "reject"
+    }
+  ],
+
+  "failurePolicyId": "normalization-failure-policy",
+  "proofContractId": "response-normalization-proof.v1"
+}

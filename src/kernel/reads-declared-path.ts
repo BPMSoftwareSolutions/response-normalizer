@@ -1,4 +1,4 @@
-import { readsObject } from "../shared/reads-provider-values.js";
+import { readsObject } from "../kernel/reads-provider-values.js";
 
 /**
  * Resolves a declared dialect path against provider testimony.

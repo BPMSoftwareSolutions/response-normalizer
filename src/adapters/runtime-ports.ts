@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Clock, HashPort, IdentityPort } from "./response-normalizer-contract.js";
+import type { Clock, HashPort, IdentityPort } from "../shared/response-normalizer-contract.js";
 
 /**
  * Deterministic JSON serialization: object keys are emitted in sorted order so

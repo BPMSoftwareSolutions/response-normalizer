@@ -1,0 +1,32 @@
+{
+  "$schema": "../decision.schema.v1.json",
+  "decisionId": "resolve-adapter-resolution",
+  "description": "Decides whether exactly one authorized adapter may project this response. Ambiguity is a rejection, never a silent pick: if two adapters claim a response, the capability cannot say whose testimony it is projecting.",
+
+  "inputs": ["declaredAdapterCount", "responseRecognized"],
+
+  "matching": { "order": "first-matching-rule-wins" },
+
+  "rules": [
+    {
+      "ruleId": "no-adapter-declared",
+      "when": { "declaredAdapterCount": 0 },
+      "then": "PROVIDER_ADAPTER_NOT_FOUND"
+    },
+    {
+      "ruleId": "more-than-one-adapter-declared",
+      "when": { "multipleAdaptersDeclared": true },
+      "then": "PROVIDER_ADAPTER_AMBIGUOUS"
+    },
+    {
+      "ruleId": "response-not-recognized",
+      "when": { "responseRecognized": false },
+      "then": "PROVIDER_RESPONSE_NOT_RECOGNIZED"
+    },
+    {
+      "ruleId": "adapter-authorized",
+      "when": { "declaredAdapterCount": 1, "responseRecognized": true },
+      "then": "adapter-resolved"
+    }
+  ]
+}

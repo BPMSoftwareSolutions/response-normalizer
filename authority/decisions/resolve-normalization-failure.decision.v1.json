@@ -1,0 +1,42 @@
+{
+  "$schema": "../decision.schema.v1.json",
+  "decisionId": "resolve-normalization-failure",
+  "description": "Classifies an observed normalization failure into the stable failure vocabulary. The catch boundary observes; this table decides. No rule here authorizes a retry, a fallback, or a partial success.",
+
+  "inputs": ["failureStage", "observedErrorKind"],
+
+  "matching": { "caseSensitive": true, "order": "first-matching-rule-wins" },
+
+  "rules": [
+    {
+      "ruleId": "request-invalid",
+      "when": { "failureStage": "validate-normalization-request" },
+      "then": "NORMALIZATION_REQUEST_INVALID"
+    },
+    {
+      "ruleId": "policy-unsupported",
+      "when": { "failureStage": "validate-normalization-policy" },
+      "then": "NORMALIZATION_POLICY_UNSUPPORTED"
+    },
+    {
+      "ruleId": "hash-mismatch",
+      "when": { "failureStage": "verify-raw-response-hash" },
+      "then": "RAW_RESPONSE_HASH_MISMATCH"
+    },
+    {
+      "ruleId": "adapter-projection-threw",
+      "when": { "failureStage": "project-provider-testimony" },
+      "then": "PROVIDER_RESPONSE_MALFORMED"
+    },
+    {
+      "ruleId": "projection-violates-contract",
+      "when": { "failureStage": "validate-canonical-projection" },
+      "then": "CANONICAL_PROJECTION_INVALID"
+    },
+    {
+      "ruleId": "unclassified-failure",
+      "when": { "failureStage": "*" },
+      "then": "NORMALIZATION_FAILED"
+    }
+  ]
+}

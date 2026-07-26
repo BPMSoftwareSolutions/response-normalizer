@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capability.local/response-normalizer/decision.schema.v1.json",
+  "title": "Declared Decision",
+  "description": "A decision table authored in the semantic layer so the choice is inspectable rather than hidden in a code body. Rules are evaluated in order and the first match wins.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decisionId", "rules"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "decisionId": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+
+    "inputs": {
+      "description": "The observed facts this decision consults. Documentation for readers; the engine addresses facts by condition key.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "matching": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "caseSensitive": { "type": "boolean" },
+        "order": { "const": "first-matching-rule-wins" }
+      }
+    },
+
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleId", "when", "then"],
+        "properties": {
+          "ruleId": { "type": "string", "minLength": 1 },
+          "when": {
+            "description": "Every declared key must hold. A key is a fact path; its value is \"*\" for anything, null for absent testimony, an array for any-of, or a literal.",
+            "type": "object",
+            "minProperties": 1
+          },
+          "then": { "type": "string", "minLength": 1 },
+          "diagnostic": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "severity", "path", "message"],
+            "properties": {
+              "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+              "severity": { "enum": ["info", "warning", "error"] },
+              "path": { "type": "string", "minLength": 1 },
+              "message": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
